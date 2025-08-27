@@ -1,0 +1,1 @@
+{"indexes":[{"v":{"$numberInt":"2"},"key":{"_id":{"$numberInt":"1"}},"name":"_id_"}],"uuid":"e456f0a406864b6180f2ce3b8db683ea","collectionName":"flashcarddb","type":"collection"}

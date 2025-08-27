@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Home</title>
+</head>
+<body>
+    <h1>Create Your Cards</h1>
+    <ul>
+        {% comment %} <li><a href="{% url 'question-list' %}"> Questions</a></li> {% endcomment %}
+        <!-- Adding the link to the MCQuestionViewSet endpoint -->
+        <li><a href="{% url 'mcq_questions' %}">MCQ Questions</a></li>
+        <!-- Adding the link to the FillQuestionViewSet endpoint -->
+        <li><a href="{% url 'FillupQuestions' %}">Fill Questions</a></li>
+    </ul>
+</body>
+</html>

@@ -1,0 +1,1 @@
+{"indexes":[{"v":{"$numberInt":"2"},"key":{"_id":{"$numberInt":"1"}},"name":"_id_"},{"v":{"$numberInt":"2"},"key":{"id":{"$numberInt":"1"}},"name":"__primary_key__","unique":true},{"v":{"$numberInt":"2"},"key":{"folder_id":{"$numberInt":"1"}},"name":"Flash_file_folder_id_2611cac7"}],"uuid":"ebb5fab41fd14a76add313823c27b7f4","collectionName":"Flash_file","type":"collection"}

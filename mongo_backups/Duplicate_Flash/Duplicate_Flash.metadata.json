@@ -1,0 +1,1 @@
+{"indexes":[{"v":{"$numberInt":"2"},"key":{"_id":{"$numberInt":"1"}},"name":"_id_"}],"uuid":"196d3fee486f420496f25afebf4c9fc7","collectionName":"Duplicate_Flash","type":"collection"}

@@ -1,0 +1,1 @@
+{"indexes":[{"v":{"$numberInt":"2"},"key":{"_id":{"$numberInt":"1"}},"name":"_id_"},{"v":{"$numberInt":"2"},"key":{"id":{"$numberInt":"1"}},"name":"__primary_key__","unique":true},{"v":{"$numberInt":"2"},"key":{"created_by":{"$numberInt":"1"}},"name":"created_by_1","unique":true}],"uuid":"a5a9c15ba3784f319883bc117451626a","collectionName":"review_settings","type":"collection"}

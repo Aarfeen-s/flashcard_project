@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VIEW FLASHCARD</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <div class="flashcard-container">
+        <div class="flashcard">
+            <h2 id="question"></h2>
+            <p id="answer" style="display: none;"></p>
+            <div class="button-container">
+                <button id="prev-question-btn">Previous Question</button>
+                <button id="view-answer-btn">View Answer</button>
+                <button id="next-question-btn">Next Question</button>
+            </div>
+            <div class="options-container">
+                <button class="option-btn" id="easily-recalled-btn">Easily Recalled 😊</button>
+                <button class="option-btn" id="skip-btn">Skip ❌</button>
+                <button class="option-btn" id="partially-recalled-btn">Partially Recalled 😕</button>
+                <button class="option-btn" id="forgot-btn">Forgot ❓</button>
+            </div>
+        </div>
+    </div>
+    
+    <script src="/static/scripts.js"></script>
+</body>
+</html>

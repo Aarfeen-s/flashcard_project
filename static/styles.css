@@ -1,0 +1,70 @@
+/* styles.css */
+
+/* Flashcard container styles */
+.flashcard-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+}
+
+/* Flashcard styles */
+.flashcard {
+    background-color: #fff;
+    border: 1px solid #ccc;
+    border-radius: 10px;
+    padding: 20px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    text-align: center;
+    width: 80%; /* Adjust the width as needed */
+    max-width: 600px; /* Adjust the maximum width as needed */
+}
+
+/* Button container styles */
+.button-container {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 20px;
+}
+
+/* Previous and Next question button styles */
+#prev-question-btn,
+#next-question-btn {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 5px;
+    font-size: 16px;
+    cursor: pointer;
+    background-color: black; /* Background color for Previous and Next question buttons */
+    color: white;
+}
+
+/* View answer button styles */
+#view-answer-btn {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 5px;
+    font-size: 16px;
+    cursor: pointer;
+    background-color: #010b15; /* Background color for View answer button */
+    color: white;
+}
+
+/* Option button styles */
+.option-btn {
+    margin: 10px;
+    padding: 10px 20px;
+    border: none;
+    border-radius: 5px;
+    font-size: 16px;
+    cursor: pointer;
+    background-color: #007bff; /* Background color for options buttons */
+    color: white;
+}
+
+/* Options container styles */
+.options-container {
+    display: flex;
+    justify-content: center;
+    margin-top: 20px;
+}
