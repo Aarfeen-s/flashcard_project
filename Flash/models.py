@@ -469,9 +469,13 @@ class UploadedImage(models.Model):
     created_by = models.CharField(max_length=100)  # To store the name of the creator
     created_date = models.DateTimeField(auto_now_add=True)  # Automatic creation date
     question_type = models.CharField(max_length=15, choices=QUESTION_TYPE_CHOICES)
+    statement = models.TextField(unique=True) 
+    answers = models.JSONField(blank=True, null=True)
+    explanation = models.TextField(blank=True, null=True)
+
 
     def __str__(self):
-        return f"Image {self.id}"
+        return f"Image {self.id} - {self.statement}"
     
 
 class UserSession(models.Model):

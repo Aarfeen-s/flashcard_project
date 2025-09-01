@@ -1785,7 +1785,7 @@ from django.shortcuts import get_object_or_404
 from .models import UploadedImage, Folder
 from .serializers import UploadedImageSerializer
 
-@api_view(['GET', 'POST', 'PUT', 'DELETE'])
+@api_view(['GET', 'POST', 'PUT', 'PATCH', 'DELETE'])
 @authentication_classes([CustomJWTAuthentication])
 @permission_classes([AllowAny])
 def manage_uploaded_images(request, subfolder_id, question_id=None):
@@ -1815,18 +1815,26 @@ def manage_uploaded_images(request, subfolder_id, question_id=None):
             return Response(response_data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-    elif request.method == 'PUT':
+    elif request.method in ['PUT', 'PATCH']:
         try:
             uploaded_image = UploadedImage.objects.get(pk=question_id, folder_id=subfolder_id)
             data = request.data.copy()
             data['folder'] = subfolder_id  # Ensure folder_id remains unchanged
             data['question_type'] = uploaded_image.question_type  # Preserve existing question_type
-            data['created_by'] = request.user._id # Preserve existing created_by
-            serializer = UploadedImageSerializer(uploaded_image, data=data, partial=True, context={'request': request})
+            # ✅ safe handling of created_by
+            if request.user and hasattr(request.user, "_id"):
+                data['created_by'] = request.user._id
+            else:
+                data['created_by'] = "system"
+
+            serializer = UploadedImageSerializer(
+                uploaded_image, data=data, partial=True, context={'request': request}
+            )
+
             if serializer.is_valid():
                 updated_image = serializer.save()
                 response_data = serializer.data
-                response_data['folder'] = subfolder_id  # Include folder_id in the response
+                response_data['folder'] = subfolder_id
                 return Response(response_data)
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         except UploadedImage.DoesNotExist:

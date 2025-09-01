@@ -672,13 +672,89 @@ class PracticeLogSerializer(serializers.ModelSerializer):
 
 from rest_framework import serializers
 from .models import UploadedImage
+from .serializers import ObjectIdField
+import json
+
 
 class UploadedImageSerializer(serializers.ModelSerializer):
+    id = serializers.IntegerField(read_only=True) 
+    created_by = serializers.CharField(read_only=True)
+    tags = TagSerializer(many=True, required=False) 
+    answers = serializers.JSONField()  # ✅ Ensures parsing
+    folder = serializers.PrimaryKeyRelatedField(
+        queryset=Folder.objects.all(),
+        required=True  # ✅ make folder mandatory
+    )
+
     class Meta:
         model = UploadedImage
-        fields = ['_id', 'statement', 'created_date', 'created_by', 'question_type', 'explanation', 'answers', 'subfolder_id', 'tags']
+        fields = [
+            'id', 'statement', 'image', 'created_date', 'created_by',
+            'question_type', 'explanation', 'answers',
+            'folder', 'tags'
+        ]
         read_only_fields = ['created_date', 'created_by']
 
+    def validate_answers(self, value):
+        if isinstance(value, str):
+            try:
+                value = json.loads(value)
+            except Exception:
+                raise serializers.ValidationError("Answers must be valid JSON")
+
+        # ✅ Case 1: list (science diagrams)
+        if isinstance(value, list):
+            if not all(isinstance(item, str) for item in value):
+                raise serializers.ValidationError("All items in list must be strings")
+            return value
+
+        # ✅ Case 2: dict (math coordinates)
+        if isinstance(value, dict):
+            for k, v in value.items():
+                if not isinstance(v, str):
+                    raise serializers.ValidationError(
+                        f"Answer for {k} must be a string like 'x=150px'"
+                    )
+            return value
+
+        raise serializers.ValidationError(
+            "Answers must be either a list of strings or a dict of {label: 'x=value'}"
+        )
+    
+    def validate_tags(self, value):
+        if isinstance(value, str):  # <-- Parse form-data "text"
+            try:
+                return json.loads(value)
+            except Exception:
+                raise serializers.ValidationError("Tags must be valid JSON list")
+        return value
+
+    def create(self, validated_data):
+        tags_data = validated_data.pop('tags', [])
+        uploaded_image = UploadedImage.objects.create(**validated_data)
+
+        for tag_data in tags_data:
+            tag, _ = Tag.objects.get_or_create(name=tag_data['name'])
+            uploaded_image.tags.add(tag)
+
+        return uploaded_image
+
+    def update(self, instance, validated_data):
+        tags_data = validated_data.pop('tags', None)
+
+        # update normal fields
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+
+        # update tags if provided
+        if tags_data is not None:
+            instance.tags.clear()
+            for tag_data in tags_data:
+                tag, _ = Tag.objects.get_or_create(name=tag_data['name'])
+                instance.tags.add(tag)
+
+        return instance
 
 
 
