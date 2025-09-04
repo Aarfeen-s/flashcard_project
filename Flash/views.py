@@ -14,8 +14,8 @@ from .models import User
 from rest_framework import serializers
 from rest_framework.views import APIView
 from rest_framework.viewsets import ModelViewSet
-from rest_framework.parsers import MultiPartParser, FormParser
-from rest_framework.decorators import api_view
+from rest_framework.parsers import MultiPartParser
+from rest_framework.decorators import api_view, parser_classes
 from django.http import HttpRequest
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -56,6 +56,9 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from .utils import has_permission
 from .utils import sr_enabled_for
 
+from bson import ObjectId
+from django.http import JsonResponse, HttpResponse
+from .gridfs_connection import fs
 
 
 
@@ -603,7 +606,7 @@ def mcq_questions(request):
 
 
 
-from rest_framework.decorators import api_view, authentication_classes, permission_classes
+from rest_framework.decorators import api_view, authentication_classes, permission_classes, parser_classes
 from rest_framework.response import Response
 from rest_framework.status import HTTP_401_UNAUTHORIZED
 from .models import MCQAnswer
@@ -1778,7 +1781,7 @@ class PracticeLogViewSet(ModelViewSet):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, parser_classes
 from rest_framework.response import Response
 from rest_framework import status
 from django.shortcuts import get_object_or_404
@@ -1792,7 +1795,8 @@ def manage_uploaded_images(request, subfolder_id, question_id=None):
     if request.method == 'GET':
         if question_id:
             try:
-                uploaded_image = UploadedImage.objects.get(pk=question_id, folder_id=subfolder_id, created_by = request.user._id)
+                # ✅ remove created_by filter, so you can fetch even if created_by was empty
+                uploaded_image = UploadedImage.objects.get(pk=question_id, folder_id=subfolder_id)
                 serializer = UploadedImageSerializer(uploaded_image, context={'request': request})
                 return Response(serializer.data)
             except UploadedImage.DoesNotExist:
@@ -1804,24 +1808,41 @@ def manage_uploaded_images(request, subfolder_id, question_id=None):
 
     elif request.method == 'POST':
         data = request.data.copy()
-        data['folder'] = subfolder_id  # Set folder_id from URL
-        data['question_type'] = 'IMAGE'  # Default value for question_type
-        data['created_by'] = request.user._id # Default value for created_by
+        data['folder'] = subfolder_id
+        data['question_type'] = 'IMAGE'
+
+        # ✅ Handle created_by
+        if request.user and hasattr(request.user, "_id"):
+            data['created_by'] = request.user._id
+        else:
+            data['created_by'] = "system"
+
+        # ✅ Handle GridFS image upload
+        if request.FILES.get('image'):
+            file = request.FILES['image']
+            file_id = fs.put(file, filename=file.name)
+            data['gridfs_id'] = str(file_id)   # store GridFS ObjectId
+
         serializer = UploadedImageSerializer(data=data, context={'request': request})
         if serializer.is_valid():
             uploaded_image = serializer.save()
+
+            # ✅ If gridfs_id was added, save it in the instance
+            if 'gridfs_id' in data:
+                uploaded_image.gridfs_id = data['gridfs_id']
+                uploaded_image.save()
+
             response_data = serializer.data
-            response_data['folder'] = subfolder_id  # Include folder_id in the response
+            response_data['folder'] = subfolder_id
             return Response(response_data, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     elif request.method in ['PUT', 'PATCH']:
         try:
             uploaded_image = UploadedImage.objects.get(pk=question_id, folder_id=subfolder_id)
             data = request.data.copy()
-            data['folder'] = subfolder_id  # Ensure folder_id remains unchanged
-            data['question_type'] = uploaded_image.question_type  # Preserve existing question_type
-            # ✅ safe handling of created_by
+            data['folder'] = subfolder_id
+            data['question_type'] = uploaded_image.question_type
+
             if request.user and hasattr(request.user, "_id"):
                 data['created_by'] = request.user._id
             else:
@@ -1830,7 +1851,6 @@ def manage_uploaded_images(request, subfolder_id, question_id=None):
             serializer = UploadedImageSerializer(
                 uploaded_image, data=data, partial=True, context={'request': request}
             )
-
             if serializer.is_valid():
                 updated_image = serializer.save()
                 response_data = serializer.data
@@ -1847,6 +1867,69 @@ def manage_uploaded_images(request, subfolder_id, question_id=None):
             return Response({"message": "UploadedImage has been successfully deleted."}, status=status.HTTP_200_OK)
         except UploadedImage.DoesNotExist:
             return Response({"error": "UploadedImage not found."}, status=status.HTTP_404_NOT_FOUND)
+        
+@api_view(['GET'])
+def get_gridfs_image(request, file_id):
+    try:
+        grid_out = fs.get(ObjectId(file_id))
+        response = HttpResponse(grid_out.read(), content_type="image/jpeg")
+        response['Content-Disposition'] = f'inline; filename={grid_out.filename}'
+        return response
+    except Exception:
+        return JsonResponse({"error": "Image not found"}, status=404)
+
+@api_view(['GET'])
+@authentication_classes([CustomJWTAuthentication])
+@permission_classes([IsAuthenticated])
+def get_all_uploaded_images(request):
+    uploaded_images = UploadedImage.objects.all()
+    serializer = UploadedImageSerializer(uploaded_images, many=True, context={'request': request})
+    return Response(serializer.data)
+
+        
+@api_view(['POST'])
+@authentication_classes([CustomJWTAuthentication])
+@permission_classes([IsAuthenticated])
+def validate_uploaded_image_answer(request, subfolder_id, question_id):
+    """
+    Validate student's drag & drop answer for an UploadedImage question
+    """
+    try:
+        uploaded_image = UploadedImage.objects.get(pk=question_id, folder_id=subfolder_id)
+    except UploadedImage.DoesNotExist:
+        return Response({"error": "UploadedImage not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    student_answers = request.data.get("answers", {})   # e.g. { "blank1": "having a picnic" }
+    correct_answers = uploaded_image.answers or {}      # stored JSON
+
+    results = {}
+    all_correct = True
+    unanswered_count = 0
+    correct_count = 0
+
+    for blank, correct_value in correct_answers.items():
+        student_value = student_answers.get(blank)
+
+        if not student_value:  # ❌ student didn’t answer this blank
+            results[blank] = {"student": None, "status": "Unanswered", "expected": correct_value}
+            unanswered_count += 1
+            all_correct = False
+        elif student_value.strip().lower() == correct_value.strip().lower():
+            results[blank] = {"student": student_value, "status": "Correct"}
+            correct_count += 1
+        else:
+            results[blank] = {"student": student_value, "status": "Incorrect", "expected": correct_value}
+            all_correct = False
+
+    total_questions = len(correct_answers)
+
+    return Response({
+        "question_id": question_id,
+        "is_all_correct": all_correct,
+        "unanswered_count": unanswered_count,
+        "score": f"{correct_count}/{total_questions}",
+        "results": results
+    }, status=status.HTTP_200_OK)
         
 # from bson import ObjectId
 # class RegisterUserView(GenericAPIView):
@@ -2193,7 +2276,7 @@ def logout_user(request):
 from datetime import datetime, timedelta
 from django.db.models import Count, Q
 from django.utils import timezone
-from rest_framework.decorators import api_view, authentication_classes, permission_classes
+from rest_framework.decorators import api_view, authentication_classes, permission_classes, parser_classes
 from rest_framework.response import Response
 
 logger = logging.getLogger(__name__)
@@ -3095,7 +3178,7 @@ def quiz_history(request):
 
 from datetime import timedelta
 from django.utils import timezone
-from rest_framework.decorators import api_view, authentication_classes, permission_classes
+from rest_framework.decorators import api_view, authentication_classes, permission_classes, parser_classes
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from .models import ReviewSession
@@ -3360,7 +3443,7 @@ class UserProfileViewSet(viewsets.ModelViewSet):
 
 
 from django.db.models import Q
-from rest_framework.decorators import api_view, authentication_classes, permission_classes
+from rest_framework.decorators import api_view, authentication_classes, permission_classes, parser_classes
 from rest_framework.response import Response
 from rest_framework import status
 from .models import MCQuestion, Question, FillQuestions, CheckStatement, TrueFalse, Tag
@@ -3457,7 +3540,7 @@ def admin_register_user(request):
 
 
 from bson import ObjectId
-from rest_framework.decorators import api_view, authentication_classes, permission_classes
+from rest_framework.decorators import api_view, authentication_classes, permission_classes, parser_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from .models import UserPermission
@@ -3904,7 +3987,7 @@ def import_all_questions_csv(request):
 
 
 # views.py
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, permission_classes, parser_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status

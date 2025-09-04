@@ -463,16 +463,19 @@ class UploadedImage(models.Model):
         ('TRUEFALSE', 'True or False'),
         ('IMAGE', 'Diagram Study'),
     ]
-    image = models.ImageField(upload_to='images/')
-    folder = models.ForeignKey(Folder, on_delete=models.CASCADE, related_name='upload_images', blank=True, null=True)
-    tags = models.ManyToManyField(Tag, related_name='upload_images', blank=True)
-    created_by = models.CharField(max_length=100)  # To store the name of the creator
-    created_date = models.DateTimeField(auto_now_add=True)  # Automatic creation date
-    question_type = models.CharField(max_length=15, choices=QUESTION_TYPE_CHOICES)
-    statement = models.TextField(unique=True) 
-    answers = models.JSONField(blank=True, null=True)
-    explanation = models.TextField(blank=True, null=True)
 
+    folder = models.ForeignKey(
+        Folder, on_delete=models.CASCADE, related_name='upload_images',
+        blank=True, null=True
+    )
+    tags = models.ManyToManyField(Tag, related_name='upload_images', blank=True)
+    created_by = models.CharField(max_length=100)
+    created_date = models.DateTimeField(auto_now_add=True)
+    question_type = models.CharField(max_length=15, choices=QUESTION_TYPE_CHOICES)
+    statement = models.TextField(blank=True, null=True)
+    masks = models.JSONField(blank=True, null=True)
+    explanation = models.TextField(blank=True, null=True)
+    gridfs_id = models.CharField(max_length=255, blank=True, null=True)
 
     def __str__(self):
         return f"Image {self.id} - {self.statement}"

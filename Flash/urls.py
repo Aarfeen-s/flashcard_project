@@ -7,7 +7,7 @@ from django.conf.urls.static import static
 from django.urls import path, include
 from .views import (AllReviewFlashcardsView, DueReviewFlashcardsView,MCQuestionViewSet,  MCQAnswerViewSet, PracticeLogViewSet, QuestionsViewSet,AnswersViewSet, 
 FillQuestionViewSet, FillAnswerViewSet,CheckStatementViewSet, QuizViewSet, ReviewFlashcardsBySubfolderView, ReviewFlashcardsView, ReviewSettingsViewSet,TrueFalseViewSet,FeedbackViewSet, assign_custom_role_to_user, backup_mongodb, create_custom_role, custom_user_register_user, delete_folder_and_questions, export_all_questions_csv, get_current_user_permissions, get_custom_role_permissions, get_my_details, import_all_questions_csv, list_custom_roles, list_users_by_custom_role, mcq_crud,fib_crud, restore_mongodb, set_custom_role_permissions, sub_crud,truefalse_crud,manage_tags, 
-QuestionFeedbackView, VerifyUserEmail,  TestingAuthenticatedReq,VerifyUserEmail, TestingAuthenticatedReq, PasswordResetConfirm, PasswordResetRequestView,
+QuestionFeedbackView, VerifyUserEmail,  TestingAuthenticatedReq,VerifyUserEmail, TestingAuthenticatedReq, PasswordResetConfirm, PasswordResetRequestView,manage_uploaded_images, validate_uploaded_image_answer, get_all_uploaded_images,
 SetNewPasswordView, LogoutApiView, view_user_details, view_users_under_custom_role, weekly_summary, daily_summary, monthly_summary, get_user_sessions, ResendOTPView, admin_register_user, initial_admin_register, login_user, LoginUserView, delete_user)
 from .views import GoogleLoginAPIView
 from .views import get_quiz_attempt_result
@@ -76,6 +76,9 @@ urlpatterns = [
 
     path('subfolder/<int:subfolder_id>/uploaded_images/', views.manage_uploaded_images, name='manage_uploaded_images'),  #done
     path('subfolder/<int:subfolder_id>/uploaded_images/<int:question_id>/', views.manage_uploaded_images, name='manage_uploaded_image_detail'),  #done
+    path('subfolder/<int:subfolder_id>/uploaded_images/<int:question_id>/validate/', validate_uploaded_image_answer, name='validate_uploaded_image_answer'),
+    path('uploaded_images/', get_all_uploaded_images, name='all-uploaded-images'),
+    path('gridfs_image/<str:file_id>/', views.get_gridfs_image, name='get_gridfs_image'),
     path('subfolders/<int:pk>/move_subfolder/', views.FolderViewSet.as_view({'post': 'move_subfolder'}), name='move-subfolder'),  #done
     path('review-schedule/', ReviewFlashcardsView.as_view(), name='review-schedule'),
     path('review-schedule/subfolder/<int:subfolder_id>/', ReviewFlashcardsBySubfolderView.as_view(), name='review-flashcards-by-subfolder'),

@@ -679,50 +679,44 @@ import json
 class UploadedImageSerializer(serializers.ModelSerializer):
     id = serializers.IntegerField(read_only=True) 
     created_by = serializers.CharField(read_only=True)
+    file_url = serializers.SerializerMethodField()
     tags = TagSerializer(many=True, required=False) 
-    answers = serializers.JSONField()  # ✅ Ensures parsing
+    masks = serializers.JSONField(required=True)
     folder = serializers.PrimaryKeyRelatedField(
         queryset=Folder.objects.all(),
-        required=True  # ✅ make folder mandatory
+        required=True
     )
 
     class Meta:
         model = UploadedImage
         fields = [
-            'id', 'statement', 'image', 'created_date', 'created_by',
-            'question_type', 'explanation', 'answers',
-            'folder', 'tags'
+            'id', 'statement', 'created_date', 'created_by',
+            'question_type', 'explanation', 'masks',
+            'folder', 'tags', 'gridfs_id', 'file_url'
         ]
-        read_only_fields = ['created_date', 'created_by']
+        read_only_fields = ['created_date', 'created_by', 'gridfs_id']
 
-    def validate_answers(self, value):
+    def validate_masks(self, value):
+        # ✅ If masks is a string (from form-data), try parsing it
         if isinstance(value, str):
+            import json
             try:
                 value = json.loads(value)
             except Exception:
-                raise serializers.ValidationError("Answers must be valid JSON")
+                raise serializers.ValidationError("Masks must be valid JSON string or list.")
 
-        # ✅ Case 1: list (science diagrams)
-        if isinstance(value, list):
-            if not all(isinstance(item, str) for item in value):
-                raise serializers.ValidationError("All items in list must be strings")
-            return value
+        if not isinstance(value, list):
+            raise serializers.ValidationError("Masks must be a list of objects.")
 
-        # ✅ Case 2: dict (math coordinates)
-        if isinstance(value, dict):
-            for k, v in value.items():
-                if not isinstance(v, str):
-                    raise serializers.ValidationError(
-                        f"Answer for {k} must be a string like 'x=150px'"
-                    )
-            return value
-
-        raise serializers.ValidationError(
-            "Answers must be either a list of strings or a dict of {label: 'x=value'}"
-        )
+        for mask in value:
+            if not all(k in mask for k in ("x", "y", "width", "height", "answer")):
+                raise serializers.ValidationError(
+                    "Each mask must have x, y, width, height, and answer."
+                )
+        return value
     
     def validate_tags(self, value):
-        if isinstance(value, str):  # <-- Parse form-data "text"
+        if isinstance(value, str):
             try:
                 return json.loads(value)
             except Exception:
@@ -740,14 +734,15 @@ class UploadedImageSerializer(serializers.ModelSerializer):
         return uploaded_image
 
     def update(self, instance, validated_data):
+        if "folder" in validated_data:
+            instance.folder = validated_data["folder"]
+
         tags_data = validated_data.pop('tags', None)
 
-        # update normal fields
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
 
-        # update tags if provided
         if tags_data is not None:
             instance.tags.clear()
             for tag_data in tags_data:
@@ -755,6 +750,12 @@ class UploadedImageSerializer(serializers.ModelSerializer):
                 instance.tags.add(tag)
 
         return instance
+    
+    def get_file_url(self, obj):
+        if obj.gridfs_id:
+            request = self.context.get('request')
+            return request.build_absolute_uri(f"/gridfs_image/{obj.gridfs_id}/")
+        return None
 
 
 
