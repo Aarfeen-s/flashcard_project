@@ -1843,30 +1843,60 @@ def manage_uploaded_images(request, subfolder_id, question_id=None):
             data['folder'] = subfolder_id
             data['question_type'] = uploaded_image.question_type
 
+            # ✅ Handle created_by
             if request.user and hasattr(request.user, "_id"):
                 data['created_by'] = request.user._id
             else:
                 data['created_by'] = "system"
+
+            # ✅ Handle GridFS image upload for update
+            if request.FILES.get('image'):
+                file = request.FILES['image']
+                file_id = fs.put(file, filename=file.name)
+                data['gridfs_id'] = str(file_id)
 
             serializer = UploadedImageSerializer(
                 uploaded_image, data=data, partial=True, context={'request': request}
             )
             if serializer.is_valid():
                 updated_image = serializer.save()
+
+                # ✅ Save gridfs_id if new image uploaded
+                if 'gridfs_id' in data:
+                    updated_image.gridfs_id = data['gridfs_id']
+                    updated_image.save()
+
                 response_data = serializer.data
                 response_data['folder'] = subfolder_id
                 return Response(response_data)
+
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
         except UploadedImage.DoesNotExist:
             return Response({"error": "UploadedImage not found."}, status=status.HTTP_404_NOT_FOUND)
+
 
     elif request.method == 'DELETE':
         try:
             uploaded_image = UploadedImage.objects.get(pk=question_id, folder_id=subfolder_id)
+
+            # ✅ If image exists in GridFS, delete it too
+            if uploaded_image.gridfs_id:
+                try:
+                    fs.delete(ObjectId(uploaded_image.gridfs_id))
+                except Exception:
+                    pass  # don’t crash if already missing
+
             uploaded_image.delete()
-            return Response({"message": "UploadedImage has been successfully deleted."}, status=status.HTTP_200_OK)
+            return Response(
+                {"message": "UploadedImage Question has been successfully deleted."},
+                status=status.HTTP_200_OK
+            )
         except UploadedImage.DoesNotExist:
-            return Response({"error": "UploadedImage not found."}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {"error": "UploadedImage not found."},
+                status=status.HTTP_404_NOT_FOUND
+            )
         
 @api_view(['GET'])
 def get_gridfs_image(request, file_id):
@@ -1910,7 +1940,7 @@ def validate_uploaded_image_answer(request, subfolder_id, question_id):
     for blank, correct_value in correct_answers.items():
         student_value = student_answers.get(blank)
 
-        if not student_value:  # ❌ student didn’t answer this blank
+        if not student_value: 
             results[blank] = {"student": None, "status": "Unanswered", "expected": correct_value}
             unanswered_count += 1
             all_correct = False
