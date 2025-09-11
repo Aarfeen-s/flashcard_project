@@ -1835,6 +1835,7 @@ def manage_uploaded_images(request, subfolder_id, question_id=None):
             response_data = serializer.data
             response_data['folder'] = subfolder_id
             return Response(response_data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     elif request.method in ['PUT', 'PATCH']:
         try:
@@ -1922,43 +1923,90 @@ def get_all_uploaded_images(request):
 @permission_classes([IsAuthenticated])
 def validate_uploaded_image_answer(request, subfolder_id, question_id):
     """
-    Validate student's drag & drop answer for an UploadedImage question
+    Validate student's
+      - drag & drop answer for an UploadedImage question
+     - labelled diagrams (map, biology, generic)
     """
     try:
         uploaded_image = UploadedImage.objects.get(pk=question_id, folder_id=subfolder_id)
     except UploadedImage.DoesNotExist:
         return Response({"error": "UploadedImage not found."}, status=status.HTTP_404_NOT_FOUND)
 
-    student_answers = request.data.get("answers", {})   # e.g. { "blank1": "having a picnic" }
-    correct_answers = uploaded_image.answers or {}      # stored JSON
+    # student answers submitted from frontend
+    student_answers = request.data.get("answers", {})  # dict { "1": "Rajasthan", "2": "Punjab" }
+
+    # ✅ Decide which answer set to use
+    if uploaded_image.labels:
+        correct_answers = uploaded_image.labels      # {"1": "Rajasthan", "2": "Punjab"}
+    elif uploaded_image.masks:
+        # build { "blank_id": "expected_answer" } from masks list
+        correct_answers = {str(i+1): m.get("answer", "") for i, m in enumerate(uploaded_image.masks)}
+    else:
+        correct_answers = {}
 
     results = {}
     all_correct = True
     unanswered_count = 0
     correct_count = 0
 
-    for blank, correct_value in correct_answers.items():
-        student_value = student_answers.get(blank)
+    for key, correct_value in correct_answers.items():
+        student_value = student_answers.get(key)
 
-        if not student_value: 
-            results[blank] = {"student": None, "status": "Unanswered", "expected": correct_value}
+        if not student_value:
+            results[key] = {
+                "student": None,
+                "status": "Unanswered",
+                "expected": correct_value
+            }
             unanswered_count += 1
             all_correct = False
+
         elif student_value.strip().lower() == correct_value.strip().lower():
-            results[blank] = {"student": student_value, "status": "Correct"}
+            results[key] = {
+                "student": student_value,
+                "status": "Correct"
+            }
             correct_count += 1
+
         else:
-            results[blank] = {"student": student_value, "status": "Incorrect", "expected": correct_value}
+            results[key] = {
+                "student": student_value,
+                "status": "Incorrect",
+                "expected": correct_value
+            }
             all_correct = False
 
-    total_questions = len(correct_answers)
+    response_data = {
+        "question_id": question_id,
+        "all_correct": all_correct,
+        "unanswered_count": unanswered_count,
+        "correct_count": correct_count,
+        "total": len(correct_answers),
+        "results": results
+    }
 
+    return Response(response_data, status=status.HTTP_200_OK)
+
+@api_view(['GET'])
+@authentication_classes([CustomJWTAuthentication])
+@permission_classes([IsAuthenticated])
+def get_image_labels(request, question_id):
+    """
+    Return number → answer mapping for any labelled image (map, biology diagram, etc.)
+    """
+    try:
+        uploaded_image = UploadedImage.objects.get(pk=question_id)
+    except UploadedImage.DoesNotExist:
+        return Response(
+            {"error": "UploadedImage not found."},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    labels = uploaded_image.answers or {}
     return Response({
         "question_id": question_id,
-        "is_all_correct": all_correct,
-        "unanswered_count": unanswered_count,
-        "score": f"{correct_count}/{total_questions}",
-        "results": results
+        "labels": labels,
+        "image_type": uploaded_image.image_type  # e.g. "map", "biology", "generic"
     }, status=status.HTTP_200_OK)
         
 # from bson import ObjectId

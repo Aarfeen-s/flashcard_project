@@ -474,6 +474,7 @@ class UploadedImage(models.Model):
     question_type = models.CharField(max_length=15, choices=QUESTION_TYPE_CHOICES)
     statement = models.TextField(blank=True, null=True)
     masks = models.JSONField(blank=True, null=True)
+    labels = models.JSONField(blank=True, null=True)
     explanation = models.TextField(blank=True, null=True)
     gridfs_id = models.CharField(max_length=255, blank=True, null=True)
 

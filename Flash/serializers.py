@@ -681,7 +681,8 @@ class UploadedImageSerializer(serializers.ModelSerializer):
     created_by = serializers.CharField(read_only=True)
     file_url = serializers.SerializerMethodField()
     tags = TagSerializer(many=True, required=False) 
-    masks = serializers.JSONField(required=True)
+    masks = serializers.JSONField(required=False)
+    labels = serializers.JSONField(required=False)
     folder = serializers.PrimaryKeyRelatedField(
         queryset=Folder.objects.all(),
         required=True
@@ -691,7 +692,7 @@ class UploadedImageSerializer(serializers.ModelSerializer):
         model = UploadedImage
         fields = [
             'id', 'statement', 'created_date', 'created_by',
-            'question_type', 'explanation', 'masks',
+            'question_type', 'explanation', 'masks', 'labels',
             'folder', 'tags', 'gridfs_id', 'file_url'
         ]
         read_only_fields = ['created_date', 'created_by', 'gridfs_id']
@@ -715,6 +716,19 @@ class UploadedImageSerializer(serializers.ModelSerializer):
                 )
         return value
     
+    def validate_labels(self, value):
+        if value is None:
+            return value
+        if isinstance(value, str):
+            import json
+            try:
+                value = json.loads(value)
+            except Exception:
+                raise serializers.ValidationError("Labels must be valid JSON string or dict.")
+        if not isinstance(value, dict):
+            raise serializers.ValidationError("Labels must be a dictionary { '1': 'Answer' }")
+        return value
+    
     def validate_tags(self, value):
         if isinstance(value, str):
             try:
@@ -725,6 +739,10 @@ class UploadedImageSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         tags_data = validated_data.pop('tags', [])
+
+        validated_data['masks'] = validated_data.get('masks') or {}
+        validated_data['labels'] = validated_data.get('labels') or {}
+
         uploaded_image = UploadedImage.objects.create(**validated_data)
 
         for tag_data in tags_data:
@@ -738,6 +756,9 @@ class UploadedImageSerializer(serializers.ModelSerializer):
             instance.folder = validated_data["folder"]
 
         tags_data = validated_data.pop('tags', None)
+
+        validated_data['masks'] = validated_data.get('masks') or {}
+        validated_data['labels'] = validated_data.get('labels') or {}
 
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
