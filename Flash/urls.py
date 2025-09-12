@@ -6,7 +6,7 @@ from django.conf import settings
 from django.conf.urls.static import static
 from django.urls import path, include
 from .views import (AllReviewFlashcardsView, DueReviewFlashcardsView,MCQuestionViewSet,  MCQAnswerViewSet, PracticeLogViewSet, QuestionsViewSet,AnswersViewSet, 
-FillQuestionViewSet, FillAnswerViewSet,CheckStatementViewSet, QuizViewSet, ReviewFlashcardsBySubfolderView, ReviewFlashcardsView, ReviewSettingsViewSet,TrueFalseViewSet,FeedbackViewSet, assign_custom_role_to_user, backup_mongodb, create_custom_role, custom_user_register_user, delete_folder_and_questions, export_all_questions_csv, get_current_user_permissions, get_custom_role_permissions, get_my_details, import_all_questions_csv, list_custom_roles, list_users_by_custom_role, mcq_crud,fib_crud, restore_mongodb, set_custom_role_permissions, sub_crud,truefalse_crud,manage_tags, 
+FillQuestionViewSet, FillAnswerViewSet,CheckStatementViewSet, QuizViewSet, ReviewFlashcardsBySubfolderView, ReviewFlashcardsView, ReviewSettingsViewSet,TrueFalseViewSet,FeedbackViewSet, assign_custom_role_to_user, backup_mongodb, create_custom_role, custom_user_register_user, delete_folder_and_questions, export_all_questions_csv, export_all_questions_markdown, get_current_user_permissions, get_custom_role_permissions, get_my_details, import_all_questions_csv, import_all_questions_markdown, list_custom_roles, list_users_by_custom_role, mcq_crud,fib_crud, restore_mongodb, set_custom_role_permissions, sub_crud,truefalse_crud,manage_tags, 
 QuestionFeedbackView, VerifyUserEmail,  TestingAuthenticatedReq,VerifyUserEmail, TestingAuthenticatedReq, PasswordResetConfirm, PasswordResetRequestView,manage_uploaded_images, upload_image_question_crud, validate_uploaded_image_answer, get_all_uploaded_images,
 SetNewPasswordView, LogoutApiView, view_user_details, view_users_under_custom_role, weekly_summary, daily_summary, monthly_summary, get_user_sessions, ResendOTPView, admin_register_user, initial_admin_register, login_user, LoginUserView, delete_user)
 from .views import GoogleLoginAPIView
@@ -140,6 +140,8 @@ urlpatterns = [
     #path("change-user-role/", change_user_role, name="change-user-role"),
     path('export-questions-csv/', export_all_questions_csv, name='export-questions-csv'),
     path('import-questions-csv/', import_all_questions_csv, name='import-questions-csv'),
+    path('export/markdown/', export_all_questions_markdown),
+    path('import/markdown/', import_all_questions_markdown),
 
     path('delete-folder/<int:folder_id>/', delete_folder_and_questions),
 

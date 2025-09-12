@@ -4145,6 +4145,118 @@ def import_all_questions_csv(request):
 
     return Response({'message': f'CSV import completed. Questions added under folder: \"{folder_name}\"'})
 
+import io
+from django.http import HttpResponse
+from rest_framework.decorators import api_view, authentication_classes, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from .models import MCQuestion, FillQuestions, CheckStatement, Question
+
+@api_view(['GET'])
+@authentication_classes([CustomJWTAuthentication])
+@permission_classes([IsAuthenticated])
+def export_all_questions_markdown(request):
+    buffer = io.StringIO()
+
+    # --- MCQ ---
+    buffer.write("# Multiple Choice Questions\n\n")
+    for q in MCQuestion.objects.all():
+        buffer.write(f"**Q{q.id}: {q.statement}**\n\n")
+        for a in q.answers.all():
+            correct_mark = "✅" if a.is_correct else "❌"
+            buffer.write(f"- {a.answer_text} {correct_mark}\n")
+        buffer.write(f"\nExplanation: {q.explanation or 'N/A'}\n\n")
+
+    # --- Fill in the blanks ---
+    buffer.write("# Fill in the Blanks\n\n")
+    for q in FillQuestions.objects.all():
+        buffer.write(f"**Q{q.id}: {q.statement}**\n\n")
+        for a in q.answers.all():
+            buffer.write(f"- Answer: {a.answer}\n")
+        buffer.write(f"\nExplanation: {q.explanation or 'N/A'}\n\n")
+
+    # --- True/False ---
+    buffer.write("# True/False Questions\n\n")
+    for q in CheckStatement.objects.filter(question_type='TRUEFALSE'):
+        buffer.write(f"**Q{q.id}: {q.statement}**\n\n")
+        for a in q.answers.all():
+            buffer.write(f"- {a.ans}\n")
+        buffer.write(f"\nExplanation: {q.explanation or 'N/A'}\n\n")
+
+    # --- Subjective ---
+    buffer.write("# Subjective Questions\n\n")
+    for q in Question.objects.filter(question_type='SUB'):
+        buffer.write(f"**Q{q.id}: {q.statement}**\n\n")
+        for a in q.related_answers.all():
+            buffer.write(f"- Answer: {a.answer_text}\n")
+        buffer.write(f"\nExplanation: {q.explanation or 'N/A'}\n\n")
+
+    response = HttpResponse(buffer.getvalue(), content_type="text/markdown")
+    response['Content-Disposition'] = 'attachment; filename="all_questions.md"'
+    return response
+
+import re
+from rest_framework.decorators import api_view, parser_classes, permission_classes
+from rest_framework.parsers import MultiPartParser
+from rest_framework.response import Response
+from collections import defaultdict
+from .models import MCQuestion, MCQAnswer, FillQuestions, FillAnswers, CheckStatement, TrueFalse, Question, Answer, Folder
+
+@api_view(['POST'])
+@parser_classes([MultiPartParser])
+@authentication_classes([CustomJWTAuthentication])
+@permission_classes([IsAuthenticated])
+def import_all_questions_markdown(request):
+    file = request.FILES.get('file')
+    if not file or not file.name.endswith('.md'):
+        return Response({'error': 'Markdown (.md) file is required.'}, status=400)
+
+    content = file.read().decode('utf-8')
+
+    # Simple parsing using regex and section headers
+    sections = re.split(r'# (.+)\n', content)
+    user = request.user
+
+    folder = Folder.objects.create(
+        name="Markdown Import",
+        created_by=user._id,
+        type="folder",
+        parent=None
+    )
+
+    # Process each section
+    for i in range(1, len(sections), 2):
+        section_title = sections[i].strip().upper()
+        section_content = sections[i+1]
+
+        questions = re.split(r'\*\*Q\d+: ', section_content)
+        for q_text in questions[1:]:  # skip first empty
+            lines = q_text.strip().split("\n")
+            statement = lines[0].strip("**")
+            answers = [line.strip("- ") for line in lines[1:] if line.startswith("- ")]
+            explanation = next((line.split("Explanation:")[1].strip() for line in lines if line.startswith("Explanation:")), "")
+
+            if "MULTIPLE CHOICE" in section_title:
+                q = MCQuestion.objects.create(statement=statement, explanation=explanation, question_type="MCQ", created_by=user._id, folder=folder)
+                for ans in answers:
+                    is_correct = ans.endswith("✅")
+                    MCQAnswer.objects.create(question=q, answer_text=ans.replace("✅", "").replace("❌", "").strip(), is_correct=is_correct, folder=folder)
+
+            elif "FILL" in section_title:
+                q = FillQuestions.objects.create(statement=statement, explanation=explanation, question_type="FIB", created_by=user._id, folder=folder)
+                for ans in answers:
+                    FillAnswers.objects.create(question=q, answer=ans, folder=folder)
+
+            elif "TRUE/FALSE" in section_title:
+                q = CheckStatement.objects.create(statement=statement, explanation=explanation, question_type="TRUEFALSE", created_by=user._id, folder=folder)
+                for ans in answers:
+                    TrueFalse.objects.create(statement=q, ans=ans, folder=folder)
+
+            elif "SUBJECTIVE" in section_title:
+                q = Question.objects.create(statement=statement, explanation=explanation, question_type="SUB", created_by=user._id, folder=folder)
+                for ans in answers:
+                    Answer.objects.create(question=q, answer_text=ans, folder=folder)
+
+    return Response({"message": "Markdown import completed successfully!"})
 
 
 # views.py
