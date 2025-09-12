@@ -23,7 +23,7 @@ from django.http import JsonResponse, Http404
 from django.views.decorators.http import require_POST
 from django.contrib.auth import authenticate
 from rest_framework_simplejwt.tokens import RefreshToken, AccessToken
-from .models import MCQuestion, MCQAnswer, Question, Answer, FillQuestions, FillAnswers, Feedback, CheckStatement, TrueFalse,UploadedImage, Folder,File,Feedback,Tag, User
+from .models import MCQuestion, MCQAnswer, Question, Answer, FillQuestions, FillAnswers, Feedback, CheckStatement, TrueFalse,UploadedImage, Folder, File, Tag, User
 from .serializers import (
     CheckStatementOnlySerializer, MCQuestionSerializer, MCQAnswerSerializer,
     QuestionSerializer, AnswerSerializer,
@@ -1131,6 +1131,51 @@ def truefalse_crud(request, subfolder_id, question_id=None):
             return Response({"message": "Data has been successfully deleted."}, status=status.HTTP_200_OK)
         except CheckStatement.DoesNotExist:
             return Response({"error": "Data Not found or not created by the logged-in user."}, status=status.HTTP_404_NOT_FOUND)
+        
+@api_view(['GET', 'POST', 'PUT', 'DELETE'])
+def upload_image_question_crud(request, subfolder_id, question_id=None):
+    if request.method == 'GET':
+        if question_id:
+            try:
+                question = UploadedImage.objects.get(id=question_id, folder_id=subfolder_id)
+                serializer = UploadedImageSerializer(question)
+                return Response(serializer.data)
+            except UploadedImage.DoesNotExist:
+                return Response({"error": "Question not found"}, status=status.HTTP_404_NOT_FOUND)
+        else:
+            questions = UploadedImage.objects.filter(folder_id=subfolder_id)
+            serializer = UploadedImageSerializer(questions, many=True)
+            return Response(serializer.data)
+
+    elif request.method == 'POST':
+        data = request.data.copy()
+        data['folder'] = subfolder_id
+        serializer = UploadedImageSerializer(data=data)
+        if serializer.is_valid():
+            serializer.save(created_by=request.user.username)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    elif request.method == 'PUT' and question_id:
+        try:
+            question = UploadedImage.objects.get(id=question_id, folder_id=subfolder_id)
+        except UploadedImage.DoesNotExist:
+            return Response({"error": "Question not found"}, status=status.HTTP_404_NOT_FOUND)
+        serializer = UploadedImageSerializer(question, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    elif request.method == 'DELETE' and question_id:
+        try:
+            question = UploadedImage.objects.get(id=question_id, folder_id=subfolder_id)
+            question.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        except UploadedImage.DoesNotExist:
+            return Response({"error": "Question not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    return Response({"error": "Invalid request"}, status=status.HTTP_400_BAD_REQUEST)
 
 from rest_framework.viewsets import ModelViewSet
 from .models import ReviewSettings
@@ -1752,33 +1797,33 @@ class PracticeLogViewSet(ModelViewSet):
     authentication_classes = [CustomJWTAuthentication]
     permission_classes = [IsAuthenticated]
 
-    # def get_queryset(self):
-    #     return self.queryset.filter(created_by=str(self.request.user._id)).order_by('-created_at')
+    def get_queryset(self):
+        return self.queryset.filter(
+            created_by=str(self.request.user._id)
+        ).order_by('-created_at')
 
-    # def perform_create(self, serializer):
-    #     serializer.save(created_by=str(self.request.user._id))
+    def create(self, request, *args, **kwargs):
+        user_id = str(request.user._id)
+        flashcard_id = request.data.get("flashcard_id")
+        flashcard_type = request.data.get("flashcard_type")
 
-    def perform_create(self, serializer):
-        user_id = str(self.request.user._id)
-        flashcard_id = self.request.data.get("flashcard_id")
-        flashcard_type = self.request.data.get("flashcard_type")
+        # ✅ Always fallback to {} if meta is not provided or invalid
+        meta = request.data.get("meta")
+        if not isinstance(meta, (dict, list)):
+            meta = {} 
 
-        # ✅ ensure only one log per (user, flashcard)
         practice_log, created = PracticeLog.objects.update_or_create(
             flashcard_id=flashcard_id,
             flashcard_type=flashcard_type,
             created_by=user_id,
             defaults={
-                "feedback": self.request.data.get("feedback"),
-                "meta": self.request.data.get("meta", {}),
-            },
+                "feedback": request.data.get("feedback"),
+                "meta": meta,
+            }
         )
-        return practice_log
 
-    def create(self, request, *args, **kwargs):
-        practice_log = self.perform_create(self.get_serializer())
         serializer = PracticeLogSerializer(practice_log)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        return Response(serializer.data, status=status.HTTP_200_OK) 
 
 
 from rest_framework.decorators import api_view, parser_classes
@@ -2375,6 +2420,8 @@ def weekly_summary(request):
         fib_ids = list(FillQuestions.objects.filter(created_by=user_id).values_list('id', flat=True))
         sub_ids = list(Question.objects.filter(created_by=user_id).values_list('id', flat=True))
         tf_ids = list(CheckStatement.objects.filter(created_by=user_id).values_list('id', flat=True))
+        image_ids = list(UploadedImage.objects.filter(created_by=user_id).values_list('id', flat=True))
+
 
         # Base feedback query for the user’s flashcards within the past week
         user_feedback_base = Feedback.objects.filter(
@@ -2384,7 +2431,8 @@ def weekly_summary(request):
             Q(flashcard_type='MCQ', flashcard_id__in=mcq_ids) |
             Q(flashcard_type='FIB', flashcard_id__in=fib_ids) |
             Q(flashcard_type='SUB', flashcard_id__in=sub_ids) |
-            Q(flashcard_type='TRUEFALSE', flashcard_id__in=tf_ids)
+            Q(flashcard_type='TRUEFALSE', flashcard_id__in=tf_ids) |
+            Q(flashcard_type='IMAGE', flashcard_id__in=image_ids) 
         )
 
         # Summarize feedback by type
@@ -2395,7 +2443,8 @@ def weekly_summary(request):
             'MCQ': len(mcq_ids),
             'FIB': len(fib_ids),
             'SUB': len(sub_ids),
-            'TRUEFALSE': len(tf_ids)
+            'TRUEFALSE': len(tf_ids),
+            'IMAGE': len(image_ids)
         }
 
         # Get daily review counts
@@ -2461,6 +2510,8 @@ def daily_summary(request):
         fib_ids = list(FillQuestions.objects.filter(created_by=user_id).values_list('id', flat=True))
         sub_ids = list(Question.objects.filter(created_by=user_id).values_list('id', flat=True))
         tf_ids = list(CheckStatement.objects.filter(created_by=user_id).values_list('id', flat=True))
+        image_ids = list(UploadedImage.objects.filter(created_by=user_id).values_list('id', flat=True))
+
 
         logger.info(f"User Flashcards - MCQ: {len(mcq_ids)}, FIB: {len(fib_ids)}, SUB: {len(sub_ids)}, TRUEFALSE: {len(tf_ids)}")
 
@@ -2472,7 +2523,8 @@ def daily_summary(request):
             (Q(flashcard_type='MCQ') & Q(flashcard_id__in=mcq_ids)) |
             (Q(flashcard_type='FIB') & Q(flashcard_id__in=fib_ids)) |
             (Q(flashcard_type='SUB') & Q(flashcard_id__in=sub_ids)) |
-            (Q(flashcard_type='TRUEFALSE') & Q(flashcard_id__in=tf_ids))
+            (Q(flashcard_type='TRUEFALSE', flashcard_id__in=tf_ids)) |
+            (Q(flashcard_type='IMAGE', flashcard_id__in=image_ids))
         )
 
         logger.info(f"Total feedback entries today: {user_feedback_base.count()}")
@@ -2485,7 +2537,8 @@ def daily_summary(request):
             'MCQ': len(mcq_ids),
             'FIB': len(fib_ids),
             'SUB': len(sub_ids),
-            'TRUEFALSE': len(tf_ids)
+            'TRUEFALSE': len(tf_ids),
+            'IMAGE': len(image_ids)
         }
 
         # Get hourly review counts
@@ -2541,6 +2594,8 @@ def monthly_summary(request):
         fib_ids = list(FillQuestions.objects.filter(created_by=user_id).values_list('id', flat=True))
         sub_ids = list(Question.objects.filter(created_by=user_id).values_list('id', flat=True))
         tf_ids = list(CheckStatement.objects.filter(created_by=user_id).values_list('id', flat=True))
+        image_ids = list(UploadedImage.objects.filter(created_by=user_id).values_list('id', flat=True))
+
 
         # Base feedback query for the user’s flashcards within the last 30 days
         user_feedback_base = Feedback.objects.filter(
@@ -2550,7 +2605,8 @@ def monthly_summary(request):
             Q(flashcard_type='MCQ', flashcard_id__in=mcq_ids) |
             Q(flashcard_type='FIB', flashcard_id__in=fib_ids) |
             Q(flashcard_type='SUB', flashcard_id__in=sub_ids) |
-            Q(flashcard_type='TRUEFALSE', flashcard_id__in=tf_ids)
+            Q(flashcard_type='TRUEFALSE', flashcard_id__in=tf_ids) |
+            Q(flashcard_type='IMAGE', flashcard_id__in=image_ids) 
         )
 
         # Summarize feedback by type
@@ -2561,7 +2617,8 @@ def monthly_summary(request):
             'MCQ': len(mcq_ids),
             'FIB': len(fib_ids),
             'SUB': len(sub_ids),
-            'TRUEFALSE': len(tf_ids)
+            'TRUEFALSE': len(tf_ids),
+            'IMAGE': len(image_ids)
         }
 
         # Aggregate daily review counts
@@ -2639,6 +2696,8 @@ def yearly_summary(request):
         fib_ids = list(FillQuestions.objects.filter(created_by=user_id).values_list('id', flat=True))
         sub_ids = list(Question.objects.filter(created_by=user_id).values_list('id', flat=True))
         tf_ids = list(CheckStatement.objects.filter(created_by=user_id).values_list('id', flat=True))
+        image_ids = list(UploadedImage.objects.filter(created_by=user_id).values_list('id', flat=True))
+
 
         # Base feedback query for the user’s flashcards within the last 365 days
         user_feedback_base = Feedback.objects.filter(
@@ -2648,7 +2707,8 @@ def yearly_summary(request):
             Q(flashcard_type='MCQ', flashcard_id__in=mcq_ids) |
             Q(flashcard_type='FIB', flashcard_id__in=fib_ids) |
             Q(flashcard_type='SUB', flashcard_id__in=sub_ids) |
-            Q(flashcard_type='TRUEFALSE', flashcard_id__in=tf_ids)
+            Q(flashcard_type='TRUEFALSE', flashcard_id__in=tf_ids) |
+            Q(flashcard_type='IMAGE', flashcard_id__in=image_ids) 
         )
 
         # Summarize feedback by type
@@ -2659,7 +2719,8 @@ def yearly_summary(request):
             'MCQ': len(mcq_ids),
             'FIB': len(fib_ids),
             'SUB': len(sub_ids),
-            'TRUEFALSE': len(tf_ids)
+            'TRUEFALSE': len(tf_ids),
+            'IMAGE': len(image_ids)
         }
 
         # Aggregate monthly review counts and performance metrics
@@ -2868,7 +2929,8 @@ class QuizViewSet(viewsets.ModelViewSet):
             MCQuestion.objects.filter(folder_id__in=folder_ids).count() +
             FillQuestions.objects.filter(folder_id__in=folder_ids).count() +
             CheckStatement.objects.filter(folder_id__in=folder_ids).count() +
-            Question.objects.filter(folder_id__in=folder_ids).count()
+            Question.objects.filter(folder_id__in=folder_ids).count() +
+            UploadedImage.objects.filter(folder_id__in=folder_ids, question_type='IMAGE').count()
         )
 
         
@@ -2911,6 +2973,7 @@ def get_quiz_questions(request, quiz_id):
     truefalse_questions = CheckStatement.objects.filter(folder_id__in=folder_ids)
     fillup_questions = FillQuestions.objects.filter(folder_id__in=folder_ids)
     subjective_questions = Question.objects.filter(folder_id__in=folder_ids)
+    image_questions = UploadedImage.objects.filter(folder_id__in=folder_ids, question_type='IMAGE')
 
 
     # # Fetching questions from the folder (use your actual logic for folder-based filtering)
@@ -2924,9 +2987,11 @@ def get_quiz_questions(request, quiz_id):
     truefalse_serializer = CheckStatementSerializer(truefalse_questions, many=True)
     fillup_serializer = FillQuestionsSerializer(fillup_questions, many=True)
     subjective_serializer = QuestionSerializer(subjective_questions, many=True)
+    image_serializer = UploadedImageSerializer(image_questions, many=True, context={'request': request})
+
 
     # Combining all questions
-    all_questions = mcq_serializer.data + truefalse_serializer.data + fillup_serializer.data + subjective_serializer.data
+    all_questions = ( mcq_serializer.data + truefalse_serializer.data + fillup_serializer.data + subjective_serializer.data + image_serializer.data )
 
     # Looping through questions and removing the 'correct_answer' field from each
     for question in all_questions:
@@ -2940,6 +3005,10 @@ def get_quiz_questions(request, quiz_id):
         if question['question_type'] in ['TRUEFALSE', 'FIB', 'SUB']:
             # Remove 'answers' from Fill and True/False questions
             question.pop('answers', None)
+
+        if question.get('question_type') == 'UPLOADIMAGE':  # 🔑 NEW check
+            question.pop('correct_answer', None)  # don’t leak the answer
+
     return Response(all_questions, status=200)
 
 
@@ -3259,7 +3328,8 @@ from django.utils import timezone
 from rest_framework.decorators import api_view, authentication_classes, permission_classes, parser_classes
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from .models import ReviewSession
+from .models import ReviewSession, UploadedImage
+from .serializers import UploadedImageSerializer
 from .authentication import CustomJWTAuthentication  # Assuming you're using JWT authentication
 from datetime import datetime, timedelta
 from django.utils import timezone
@@ -3540,12 +3610,14 @@ def get_questions_answers_by_tag(request, folder_id, tag_id):
         subjective_questions = Question.objects.filter(folder_id=folder_id, tags__id=tag_id)
         fill_questions = FillQuestions.objects.filter(folder_id=folder_id, tags__id=tag_id)
         truefalse_questions = CheckStatement.objects.filter(folder_id=folder_id, tags__id=tag_id)
+        image_questions = UploadedImage.objects.filter(folder_id=folder_id, tags__id=tag_id)
 
         # Serialize the data
         mcq_serializer = MCQuestionSerializer(mcq_questions, many=True)
         subjective_serializer = QuestionSerializer(subjective_questions, many=True)
         fill_serializer = FillQuestionsSerializer(fill_questions, many=True)
         truefalse_serializer = CheckStatementSerializer(truefalse_questions, many=True)
+        image_serializer = UploadedImageSerializer(image_questions, many=True)
 
         # Combine all questions and answers
         data = {
@@ -3553,6 +3625,7 @@ def get_questions_answers_by_tag(request, folder_id, tag_id):
             "subjective_questions": subjective_serializer.data,
             "fill_questions": fill_serializer.data,
             "truefalse_questions": truefalse_serializer.data,
+            "image_questions": image_serializer.data,
         }
 
         return Response(data, status=status.HTTP_200_OK)
@@ -3970,7 +4043,7 @@ def import_all_questions_csv(request):
 
     # Subfolders per question type
     subfolders = {}
-    for q_type in ['MCQ', 'FIB', 'TRUEFALSE', 'SUB']:
+    for q_type in ['MCQ', 'FIB', 'TRUEFALSE', 'SUB', 'IMAGE']:
         subfolders[q_type], _ = Folder.objects.get_or_create(name=q_type, parent=main_folder, defaults={
             'created_by': user._id,
             'type': 'folder'
@@ -4060,6 +4133,16 @@ def import_all_questions_csv(request):
                 folder=subfolders['SUB']
             )
 
+        elif q_type == 'IMAGE':
+            question = UploadedImage.objects.create(
+                statement=statement,
+                question_type='IMAGE',
+                explanation=explanation,
+                created_by=user._id,
+                folder=subfolders['IMAGE'],
+                file_url=row.get('file_url')  # assuming CSV has file_url
+    )
+
     return Response({'message': f'CSV import completed. Questions added under folder: \"{folder_name}\"'})
 
 
@@ -4092,6 +4175,8 @@ def delete_folder_and_questions(request, folder_id):
         fib_count = FillQuestions.objects.filter(folder=folder).delete()
         tf_count = CheckStatement.objects.filter(folder=folder).delete()
         sub_count = Question.objects.filter(folder=folder).delete()
+        image_count = UploadedImage.objects.filter(folder=folder).delete()
+
 
         # Delete subfolders recursively (if any)
         def delete_subfolders(parent_folder):
@@ -4101,6 +4186,7 @@ def delete_folder_and_questions(request, folder_id):
                 MCQuestion.objects.filter(folder=sub).delete()
                 FillQuestions.objects.filter(folder=sub).delete()
                 CheckStatement.objects.filter(folder=sub).delete()
+                UploadedImage.objects.filter(folder=sub).delete()
                 Question.objects.filter(folder=sub).delete()
                 sub.delete()
 
@@ -4495,7 +4581,7 @@ def questions_summary(request):
         'FIB': FillQuestions.objects.filter(created_by=user_id).count(),
         'TRUEFALSE': CheckStatement.objects.filter(created_by=user_id, question_type='TRUEFALSE').count(),
         'SUB': Question.objects.filter(created_by=user_id, question_type='SUB').count(),
-        'IMAGE': 0  # Add if you have an image question model
+        'IMAGE': UploadedImage.objects.filter(created_by=user_id).count(),
     }
     total_questions = sum(total_by_type.values())
 
@@ -4506,7 +4592,7 @@ def questions_summary(request):
         direct_fib = folder.fill_questions.filter(created_by=user_id).count()
         direct_tf = folder.check_statements.filter(created_by=user_id, question_type='TRUEFALSE').count()
         direct_sub = folder.questions.filter(created_by=user_id, question_type='SUB').count()
-        direct_image = 0  # Add if you have image questions
+        direct_image = folder.uploaded_images.filter(created_by=user_id).count()
 
         # Recursively include subfolders
         subfolders = folder.subfolders.all()
@@ -4746,6 +4832,7 @@ class DueReviewFlashcardsView(APIView):
             'FIB': FillQuestions,
             'SUB': Question,
             'TRUEFALSE': CheckStatement,
+            'IMAGE': UploadedImage,
         }.get(flashcard_type)
 
     def get_flashcard_serializer(self, flashcard_type, flashcard):
@@ -4754,6 +4841,7 @@ class DueReviewFlashcardsView(APIView):
             'FIB': FillQuestionsSerializer,
             'SUB': QuestionSerializer,
             'TRUEFALSE': CheckStatementSerializer,
+            'IMAGE': UploadedImageSerializer,
         }
         s = mapping.get(flashcard_type)
         return s(flashcard) if s else None

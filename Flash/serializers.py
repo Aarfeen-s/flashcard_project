@@ -632,7 +632,18 @@ class FeedbackSerializer(serializers.ModelSerializer):
         else:
             data['review_schedule'] = None
 
+        # ✅ Extra: include image flashcard details
+        if instance.flashcard_type == "IMAGE":
+            try:
+                from .serializers import UploadedImageSerializer
+                from .models import UploadedImage
+                image_q = UploadedImage.objects.get(id=instance.flashcard_id)
+                data['flashcard'] = UploadedImageSerializer(image_q, context=self.context).data
+            except Exception:
+                data['flashcard'] = None
+
         return data
+    
 class ObjectIdField(serializers.Field):
     def to_representation(self, value):
         if value is None:
@@ -738,8 +749,11 @@ class UploadedImageSerializer(serializers.ModelSerializer):
         return value
 
     def create(self, validated_data):
-        tags_data = validated_data.pop('tags', [])
+        request = self.context.get("request")
+        if request and hasattr(request, "user"):
+            validated_data["created_by"] = str(request.user._id)
 
+        tags_data = validated_data.pop('tags', [])
         validated_data['masks'] = validated_data.get('masks') or {}
         validated_data['labels'] = validated_data.get('labels') or {}
 
@@ -752,6 +766,10 @@ class UploadedImageSerializer(serializers.ModelSerializer):
         return uploaded_image
 
     def update(self, instance, validated_data):
+        request = self.context.get("request")
+        if request and hasattr(request, "user"):
+            validated_data["created_by"] = str(request.user._id)
+
         if "folder" in validated_data:
             instance.folder = validated_data["folder"]
 

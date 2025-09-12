@@ -7,7 +7,7 @@ from django.conf.urls.static import static
 from django.urls import path, include
 from .views import (AllReviewFlashcardsView, DueReviewFlashcardsView,MCQuestionViewSet,  MCQAnswerViewSet, PracticeLogViewSet, QuestionsViewSet,AnswersViewSet, 
 FillQuestionViewSet, FillAnswerViewSet,CheckStatementViewSet, QuizViewSet, ReviewFlashcardsBySubfolderView, ReviewFlashcardsView, ReviewSettingsViewSet,TrueFalseViewSet,FeedbackViewSet, assign_custom_role_to_user, backup_mongodb, create_custom_role, custom_user_register_user, delete_folder_and_questions, export_all_questions_csv, get_current_user_permissions, get_custom_role_permissions, get_my_details, import_all_questions_csv, list_custom_roles, list_users_by_custom_role, mcq_crud,fib_crud, restore_mongodb, set_custom_role_permissions, sub_crud,truefalse_crud,manage_tags, 
-QuestionFeedbackView, VerifyUserEmail,  TestingAuthenticatedReq,VerifyUserEmail, TestingAuthenticatedReq, PasswordResetConfirm, PasswordResetRequestView,manage_uploaded_images, validate_uploaded_image_answer, get_all_uploaded_images,
+QuestionFeedbackView, VerifyUserEmail,  TestingAuthenticatedReq,VerifyUserEmail, TestingAuthenticatedReq, PasswordResetConfirm, PasswordResetRequestView,manage_uploaded_images, upload_image_question_crud, validate_uploaded_image_answer, get_all_uploaded_images,
 SetNewPasswordView, LogoutApiView, view_user_details, view_users_under_custom_role, weekly_summary, daily_summary, monthly_summary, get_user_sessions, ResendOTPView, admin_register_user, initial_admin_register, login_user, LoginUserView, delete_user)
 from .views import GoogleLoginAPIView
 from .views import get_quiz_attempt_result
@@ -25,7 +25,7 @@ router.register(r'folders', views.FolderViewSet, basename='Folder')
 router.register(r'files', views.FileViewSet, basename= 'Files')
 router.register(r'truefalse-answers', views.TrueFalseViewSet, basename= 'True False')
 router.register(r'directory', views.DirectoryViewSet, basename='directory')
-router.register(r'feedbacks', FeedbackViewSet, basename='feedback')
+router.register(r'feedbacks', FeedbackViewSet, basename='feedback') 
 #router.register(r'quizzes', views.QuizViewSet)
 router.register(r'quiz', QuizViewSet, basename='quiz')
 router.register(r'profile', UserProfileViewSet, basename='userprofile')
@@ -107,6 +107,9 @@ urlpatterns = [
     path('quiz/<int:quiz_id>/result/', views.get_quiz_result, name='quiz-result'),
     path('quiz/<int:quiz_id>/attempt/<int:attempt_number>/', get_quiz_attempt_result, name='get_quiz_attempt_result'),
     path('quiz-history/', views.quiz_history, name='quiz-history'),
+    path('subfolder/<int:subfolder_id>/uploadimage/', upload_image_question_crud),
+    path('subfolder/<int:subfolder_id>/uploadimage/<int:question_id>/', upload_image_question_crud, name='UploadImage by subfolder'),
+
 
     path('api/day-summary/', views.day_summary, name='day_summary'),
     path('api/week-summary/', views.week_summary, name='week_summary'),

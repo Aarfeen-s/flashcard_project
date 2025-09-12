@@ -261,6 +261,7 @@ class Feedback(models.Model):
             'FIB': FillQuestions,
             'SUB': Question,
             'TRUEFALSE': CheckStatement,
+            'IMAGE': UploadedImage 
         }
         
         question_model = model_mapping.get(self.flashcard_type)
@@ -281,7 +282,8 @@ class Feedback(models.Model):
             'MCQ': (MCQuestion, MCQAnswer),
             'FIB': (FillQuestions, FillAnswers),
             'SUB': (Question, Answer),
-            'TRUEFALSE': (CheckStatement, TrueFalse)
+            'TRUEFALSE': (CheckStatement, TrueFalse),
+            'IMAGE': (UploadedImage, None)
         }
 
         related_data = None
@@ -439,8 +441,11 @@ class PracticeLog(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     created_by = models.CharField(max_length=255)
 
+    # only for IMAGE type : as it as masks and labels 
+    upload_image_questions = djongo_models.JSONField(default=dict, blank=True)
+
     # Optional free-form context (works with Djongo)
-    meta = djongo_models.JSONField(blank=True, null=True)
+    meta = djongo_models.JSONField(default=dict, blank=True)
 
     class Meta:
         db_table = 'practice_log'
