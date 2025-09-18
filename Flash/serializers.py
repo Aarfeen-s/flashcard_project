@@ -1022,7 +1022,7 @@ class VerifyUserEmailSerializer(serializers.Serializer):
 class QuizSerializer(serializers.ModelSerializer):
     class Meta:
         model = Quiz
-        fields = ['id', 'created_by', 'folder', 'total_questions', 'attempted_questions', 'correct_answers', 'started_at', 'ended_at', 'passing_percentage']
+        fields = ['id', 'created_by', 'folder', 'total_questions', 'attempted_questions', 'correct_answers', 'started_at', 'ended_at', 'passing_percentage', 'max_attempts']
 
 
 from rest_framework import serializers

@@ -2900,8 +2900,21 @@ def get_user_sessions(request):
         }, status=status.HTTP_400_BAD_REQUEST)
 
 
-
 #Quiz
+
+
+
+
+# ✅ Helper: recursively get folder IDs
+def get_all_descendant_folder_ids(folder):
+    folder_ids = [folder.id]
+    children = Folder.objects.filter(parent=folder)
+    for child in children:
+        folder_ids.extend(get_all_descendant_folder_ids(child))
+    return folder_ids
+
+
+# -------------------- Quiz ViewSet --------------------
 class QuizViewSet(viewsets.ModelViewSet):
     queryset = Quiz.objects.all()
     serializer_class = QuizSerializer
@@ -2909,245 +2922,335 @@ class QuizViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        # Allow users to access only their quizzes
-        return self.queryset.filter(user=self.request.user)
+        return self.queryset.filter(created_by=self.request.user._id)
 
     def perform_create(self, serializer):
         from .utils import has_permission
-        from django.core.exceptions import PermissionDenied
         if not has_permission(self.request.user, 'can_start_quiz'):
             raise PermissionDenied("You do not have permission to start quizzes.")
-        # ...existing code...
 
-        # Logic for starting a quiz
         folder_id = self.request.data.get('folder')
         folder = Folder.objects.get(id=folder_id)
-        # ✅ include nested subfolders
         folder_ids = get_all_descendant_folder_ids(folder)
 
-        total_questions = (
-            MCQuestion.objects.filter(folder_id__in=folder_ids).count() +
-            FillQuestions.objects.filter(folder_id__in=folder_ids).count() +
-            CheckStatement.objects.filter(folder_id__in=folder_ids).count() +
-            Question.objects.filter(folder_id__in=folder_ids).count() +
-            UploadedImage.objects.filter(folder_id__in=folder_ids, question_type='IMAGE').count()
-        )
+        # ✅ New: take question_types from payload
+        question_types = self.request.data.get('question_types', ["MCQ", "FIB", "SUB", "TRUEFALSE"])
+        if not isinstance(question_types, list):
+            raise ValueError("question_types must be a list")
 
-        
-        # Get the passing percentage from payload or use 35.0
+        total_questions = 0
+        if "MCQ" in question_types:
+            total_questions += MCQuestion.objects.filter(folder_id__in=folder_ids).count()
+        if "FIB" in question_types:
+            total_questions += FillQuestions.objects.filter(folder_id__in=folder_ids).count()
+        if "TRUEFALSE" in question_types:
+            total_questions += CheckStatement.objects.filter(folder_id__in=folder_ids).count()
+        if "SUB" in question_types:
+            total_questions += Question.objects.filter(folder_id__in=folder_ids, question_type="SUB").count()
+        if "IMAGE" in question_types:
+            images = UploadedImage.objects.filter(folder_id__in=folder_ids, question_type="IMAGE")
+            for img in images:
+                if img.labels:
+                    total_questions += len(img.labels)
+                elif img.masks:
+                    total_questions += len(img.masks)
+
         passing_percentage = self.request.data.get('passing_percentage', 35.0)
         max_attempts = self.request.data.get('max_attempts', None)
-        quiz = serializer.save(created_by=self.request.user._id, total_questions=total_questions, 
-                               passing_percentage=passing_percentage, max_attempts=max_attempts)
 
-        # Add payload response with quiz ID
+        quiz = serializer.save(
+            created_by=self.request.user._id,
+            total_questions=total_questions,
+            passing_percentage=passing_percentage,
+            max_attempts=max_attempts,
+            question_types=question_types
+        )
         self.request.data['quiz_id'] = quiz.id
 
+
+# -------------------- Get Quiz Questions --------------------
 @api_view(['GET'])
 @authentication_classes([CustomJWTAuthentication])
 @permission_classes([AllowAny])
 def get_quiz_questions(request, quiz_id):
-
     from .utils import has_permission
-    from django.core.exceptions import PermissionDenied
-    # Permission check: can_view_quiz_questions
     if not has_permission(request.user, 'can_view_quiz_questions'):
         raise PermissionDenied("You do not have permission to view quiz questions.")
-    
-    quiz = Quiz.objects.get(id=quiz_id)  # Fetch quiz instance
-    folder = quiz.folder  # Get associated folder
 
-
-    # ✅ Get all nested folder IDs recursively
-    def get_all_descendant_folder_ids(folder):
-        folder_ids = [folder.id]
-        children = Folder.objects.filter(parent=folder)
-        for child in children:
-            folder_ids.extend(get_all_descendant_folder_ids(child))
-        return folder_ids
-
+    quiz = Quiz.objects.get(id=quiz_id)
+    folder = quiz.folder
     folder_ids = get_all_descendant_folder_ids(folder)
 
-    # ✅ Fetching questions from folder + subfolders
-    mcq_questions = MCQuestion.objects.filter(folder_id__in=folder_ids)
-    truefalse_questions = CheckStatement.objects.filter(folder_id__in=folder_ids)
-    fillup_questions = FillQuestions.objects.filter(folder_id__in=folder_ids)
-    subjective_questions = Question.objects.filter(folder_id__in=folder_ids)
-    image_questions = UploadedImage.objects.filter(folder_id__in=folder_ids, question_type='IMAGE')
+    all_questions = []
+
+    if "MCQ" in quiz.question_types:
+        mcq = MCQuestion.objects.filter(folder_id__in=folder_ids)
+        mcq_serializer = MCQuestionSerializer(mcq, many=True)
+        all_questions += mcq_serializer.data
+
+    if "TRUEFALSE" in quiz.question_types:
+        tf = CheckStatement.objects.filter(folder_id__in=folder_ids)
+        tf_serializer = CheckStatementSerializer(tf, many=True)
+        all_questions += tf_serializer.data
+
+    if "FIB" in quiz.question_types:
+        fib = FillQuestions.objects.filter(folder_id__in=folder_ids)
+        fib_serializer = FillQuestionsSerializer(fib, many=True)
+        all_questions += fib_serializer.data
+
+    if "SUB" in quiz.question_types:
+        sub = Question.objects.filter(folder_id__in=folder_ids, question_type="SUB")
+        sub_serializer = QuestionSerializer(sub, many=True)
+        all_questions += sub_serializer.data
+
+    if "IMAGE" in quiz.question_types:
+        images = UploadedImage.objects.filter(folder_id__in=folder_ids, question_type="IMAGE")
+        for img in images:
+            # decide label placeholders
+            if img.labels:
+                labels = list(img.labels.keys())
+            elif img.masks:
+                labels = [str(i+1) for i, _ in enumerate(img.masks)]
+            else:
+                labels = []  # no labels or masks available
+
+            all_questions.append({
+                "id": str(img.id),
+                "question_type": "IMAGE",
+                "statement": img.statement or "",
+                "image_url": request.build_absolute_uri(f"/api/get_gridfs_image/{img.gridfs_id}") if img.gridfs_id else None,
+                "labels": labels
+            })
 
 
-    # # Fetching questions from the folder (use your actual logic for folder-based filtering)
-    # mcq_questions = MCQuestion.objects.filter(folder=folder)
-    # truefalse_questions = CheckStatement.objects.filter(folder=folder)
-    # fillup_questions = FillQuestions.objects.filter(folder=folder)
-    # subjective_questions = Question.objects.filter(folder=folder)
-
-    # Serializing questions
-    mcq_serializer = MCQuestionSerializer(mcq_questions, many=True)
-    truefalse_serializer = CheckStatementSerializer(truefalse_questions, many=True)
-    fillup_serializer = FillQuestionsSerializer(fillup_questions, many=True)
-    subjective_serializer = QuestionSerializer(subjective_questions, many=True)
-    image_serializer = UploadedImageSerializer(image_questions, many=True, context={'request': request})
-
-
-    # Combining all questions
-    all_questions = ( mcq_serializer.data + truefalse_serializer.data + fillup_serializer.data + subjective_serializer.data + image_serializer.data )
-
-    # Looping through questions and removing the 'correct_answer' field from each
+    # ✅ Remove correct answers and explanations
     for question in all_questions:
-        question.pop('correct_answer', None)  # Removing the correct answer
+        question.pop('correct_answer', None)
         question.pop('explanation', None)
         if question['question_type'] == 'MCQ':
-            # Remove 'is_correct' from MCQ answers
-            for answer in question.get('answers', []):
-                answer.pop('is_correct', None)
-        
-        if question['question_type'] in ['TRUEFALSE', 'FIB', 'SUB']:
-            # Remove 'answers' from Fill and True/False questions
+            for ans in question.get('answers', []):
+                ans.pop('is_correct', None)
+                ans.pop('explanation', None)    # ✅ remove explanation for each option
+        elif question['question_type'] in ['TRUEFALSE', 'FIB', 'SUB']:
+            question.pop('explanation', None)
             question.pop('answers', None)
 
-        if question.get('question_type') == 'UPLOADIMAGE':  # 🔑 NEW check
-            question.pop('correct_answer', None)  # don’t leak the answer
+        elif question['question_type'] == 'IMAGE':
+            # Keep statement (the question)
+            question.pop('explanation', None)   # don’t leak explanation here
+            question.pop('labels', None)        # don’t leak correct answers
+            question.pop('masks', None)
 
     return Response(all_questions, status=200)
+
+
+
+
+
+
+from rest_framework.decorators import api_view, authentication_classes, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework import status
+from django.utils import timezone
+from django.core.exceptions import PermissionDenied
+
+from .models import Quiz, QuizAttempt, QuizAttemptAnswer, MCQuestion, MCQAnswer, FillQuestions, FillAnswers, CheckStatement, TrueFalse, Question, Answer
+from .authentication import CustomJWTAuthentication
+from .utils import has_permission
+
+# --- Recursive helper to fetch folder + all descendants ---
+def get_all_subfolders(folder):
+    folders = [folder.id]
+    children = Folder.objects.filter(parent=folder)
+    for child in children:
+        folders.extend(get_all_subfolders(child))
+    return folders
 
 
 @api_view(['POST'])
 @authentication_classes([CustomJWTAuthentication])
 @permission_classes([IsAuthenticated])
 def submit_quiz_answers(request, quiz_id):
-    from .utils import has_permission
-    from django.core.exceptions import PermissionDenied
-    # Permission check: can_submit_quiz_answers
+    # Permission check
     if not has_permission(request.user, 'can_submit_quiz_answers'):
         raise PermissionDenied("You do not have permission to submit quiz answers.")
 
-
-    # Ensure the user is authenticated and get the user ID
     user_id = request.user._id
-    print(f"Authenticated user ID: {user_id}")
-
-    # Fetch the quiz for the authenticated user
     quiz = Quiz.objects.get(id=quiz_id, created_by=user_id)
 
-    answers = request.data.get('answers', [])  # List of answers from the user
+    # User answers from request (must include question_type!)
+    answers = request.data.get('answers', [])
+    attempted_questions = len(answers)
     correct_answers = 0
 
-    for answer in answers:
-        question_id = answer.get('question_id')
-        selected_answer = answer.get('selected_answer').strip().lower()
-        print(f"Processing question_id: {question_id}, selected_answer: {selected_answer}")  
-
-        # Initialize both string and integer versions
-        question_id_str = None
-        question_id_int = None
-
-        try:
-            # Try to convert to integer
-            question_id_int = int(question_id)
-            print(f"Using Integer question_id: {question_id_int}")
-        except ValueError:
-            # If conversion fails, assume it's a string ID
-            question_id_str = str(question_id)
-            print(f"Using String question_id: {question_id_str}")
-
-        # **MCQ Questions (String-based IDs)**
-        if question_id_str:
-            mcq = MCQuestion.objects.filter(id=question_id_str).first()
-            if mcq:
-                mcq_answers = MCQAnswer.objects.filter(question_id=str(mcq.id))
-                print(f"MCQuestion Answers: {mcq_answers}")
-
-                correct_mcq_answer = None
-                for ans in mcq_answers:
-                    if ans.is_correct:
-                        print(f"Answer: {ans.answer_text}, is_correct: {ans.is_correct}")
-                        correct_mcq_answer = ans.answer_text.strip().lower()
-                print(f"Correct Answer In Lower Case: {correct_mcq_answer}")
-
-                if selected_answer == correct_mcq_answer:
-                    correct_answers += 1
-                    print(f"✅ Correct answer matched for MCQ: {mcq.statement}")
-
-        # **Fill in the Blanks & True/False Questions (Integer-based IDs)**
-        if question_id_int is not None:
-            fill = FillQuestions.objects.filter(id=question_id_int).first()
-            if fill:
-                correct_fill_answers = FillAnswers.objects.filter(question=fill)
-                if correct_fill_answers.filter(answer__iexact=selected_answer).exists():
-                    correct_answers += 1
-
-            truefalse_question = CheckStatement.objects.filter(id=question_id_int).first()
-            if truefalse_question:
-                correct_tf_answers = TrueFalse.objects.filter(statement=truefalse_question)
-                if correct_tf_answers.filter(ans__iexact=selected_answer).exists():
-                    correct_answers += 1
-
-            subjective_question = Question.objects.filter(id=question_id_int, question_type="SUB").first()
-            if subjective_question:
-                correct_sub_answers = Answer.objects.filter(question=subjective_question)
-                if correct_sub_answers.filter(answer_text__iexact=selected_answer).exists():
-                    correct_answers += 1
-
+    # Previous attempts
     previous_attempts = QuizAttempt.objects.filter(quiz=quiz, user=request.user).count()
-
     if quiz.max_attempts is not None and previous_attempts >= quiz.max_attempts:
         return Response({"error": "Maximum number of attempts reached."}, status=403)
 
-    attempt_number = previous_attempts + 1        
+    attempt_number = previous_attempts + 1
 
-    
-    try:
-        attempted_questions = len(answers)
-        wrong_answers = attempted_questions - correct_answers
-        final_score = correct_answers - wrong_answers
-        total_questions = quiz.total_questions
-        score_percentage = (final_score / total_questions) * 100 if total_questions else 0
-        passing_percentage = quiz.passing_percentage or 35.0
-        result = "Pass" if score_percentage >= passing_percentage else "Fail"
-        quiz_status = "Completed" if attempted_questions == total_questions else "In Progress"
+    # Create QuizAttempt first
+    quiz_attempt = QuizAttempt.objects.create(
+        quiz=quiz,
+        user=request.user,
+        attempted_questions=0,
+        total_questions=quiz.total_questions,
+        correct_answers=0,
+        wrong_answers=0,
+        final_score=0,
+        score_percentage=0,
+        passing_percentage=quiz.passing_percentage or 35.0,
+        result="Pending",
+        quiz_status="In Progress",
+        started_at=quiz.started_at or timezone.now(),
+        ended_at=timezone.now()
+    )
 
-        quiz_attempt = QuizAttempt.objects.create(
-            quiz=quiz,
-            user=request.user,
-            attempted_questions=attempted_questions,
-            total_questions=total_questions,
-            correct_answers=correct_answers,
-            wrong_answers=wrong_answers,
-            final_score=final_score,
-            score_percentage=score_percentage,
-            passing_percentage=passing_percentage,
-            result=result,
-            quiz_status=quiz_status,
-            started_at=quiz.started_at or timezone.now(),
-            ended_at=timezone.now()
+    # --- Collect all folder IDs for validation ---
+    folder = quiz.folder
+    all_folders = get_all_subfolders(folder)
+
+    # --- Convert submitted answers into dict keyed by (id, type) ---
+    submitted_dict = {
+        (str(a.get('question_id')), str(a.get('question_type')).upper()):
+            a.get('selected_answer', [])
+        for a in answers
+    }
+
+    # --- Process each submitted answer ---
+    for (qid, qtype), given_answer in submitted_dict.items():
+        # Normalize given_answer
+        if isinstance(given_answer, list):
+            submitted_answers = [str(ans).strip().lower() for ans in given_answer if str(ans).strip()]
+        elif isinstance(given_answer, str):
+            submitted_answers = [ans.strip().lower() for ans in given_answer.split(",") if ans.strip()]
+        else:
+            submitted_answers = []
+
+        correct_answers_texts, is_correct = [], False
+
+        # --- MCQ Evaluation ---
+        if qtype == "MCQ":
+            mcq = MCQuestion.objects.filter(id=qid, folder_id__in=all_folders).first()
+            if mcq:
+                mcq_ans_all = list(MCQAnswer.objects.filter(question_id=str(mcq.id)))
+                correct_answers_texts = [ans.answer_text.strip().lower() for ans in mcq_ans_all if ans.is_correct]
+                if submitted_answers and set(submitted_answers) == set(correct_answers_texts):
+                    is_correct = True
+
+        # --- FILL Evaluation ---
+        elif qtype == "FILL":
+            fill = FillQuestions.objects.filter(id=qid, folder_id__in=all_folders).first()
+            if fill:
+                possible = [fa.answer.strip().lower() for fa in FillAnswers.objects.filter(question=fill)]
+                correct_answers_texts = possible
+                if submitted_answers and any(ans in possible for ans in submitted_answers):
+                    is_correct = True
+
+        # --- TRUE/FALSE Evaluation ---
+        elif qtype == "TF":
+            tfq = CheckStatement.objects.filter(id=qid, folder_id__in=all_folders).first()
+            if tfq:
+                possible = [tf.ans.strip().lower() for tf in TrueFalse.objects.filter(statement=tfq)]
+                correct_answers_texts = possible
+                if submitted_answers and any(ans in possible for ans in submitted_answers):
+                    is_correct = True
+
+        # --- SUBJECTIVE Evaluation ---
+        elif qtype == "SUB":
+            subj = Question.objects.filter(id=qid, folder_id__in=all_folders, question_type="SUB").first()
+            if subj:
+                possible = [a.answer_text.strip().lower() for a in Answer.objects.filter(question=subj)]
+                correct_answers_texts = possible
+                if submitted_answers and any(ans in possible for ans in submitted_answers):
+                    is_correct = True
+
+        elif qtype == "IMAGE":
+            img = UploadedImage.objects.filter(id=qid, folder_id__in=all_folders).first()
+            correct_answers_dict = {}   # ✅ always initialize
+
+        if img:
+            # expected answers
+            if img.labels:
+                correct_answers_dict = img.labels
+            elif img.masks:
+                correct_answers_dict = {
+                    str(i+1): m.get("answer", "")
+                    for i, m in enumerate(img.masks)
+                }
+
+        # submitted answers must be a dict { "1": "Rajasthan", "2": "Punjab" }
+        submitted_dict_answers = given_answer if isinstance(given_answer, dict) else {}
+
+        for key, correct_value in correct_answers_dict.items():
+            student_value = submitted_dict_answers.get(key)
+            is_correct = student_value and student_value.strip().lower() == correct_value.strip().lower()
+
+            if is_correct:
+                correct_answers += 1
+
+            QuizAttemptAnswer.objects.create(
+                attempt=quiz_attempt,
+                question_id=f"{qid}-{key}",   # treat each label as sub-question
+                question_type="IMAGE",
+                given_answer=student_value or "",
+                correct_answer=correct_value,
+                is_correct=is_correct
+            )
+
+
+        if is_correct:
+            correct_answers += 1
+
+        # Save QuizAttemptAnswer
+        QuizAttemptAnswer.objects.create(
+            attempt=quiz_attempt,
+            question_id=str(qid),
+            question_type=qtype,
+            given_answer=submitted_answers,
+            correct_answer=correct_answers_texts,
+            is_correct=is_correct
         )
 
-    except Exception as e:
-        print(f"Error saving quiz attempt: {str(e)}")
-        return Response({"error": f"Error saving quiz attempt: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    # --- Finalize attempt ---
+    wrong_answers = attempted_questions - correct_answers
+    final_score = correct_answers - wrong_answers
+    total_questions = quiz.total_questions
+    score_percentage = (final_score / total_questions) * 100 if total_questions else 0
+    passing_percentage = quiz.passing_percentage or 35.0
+    result = "Pass" if score_percentage >= passing_percentage else "Fail"
+    quiz_status = "Completed" if attempted_questions == total_questions else "In Progress"
 
-    
-   
+    quiz_attempt.attempted_questions = attempted_questions
+    quiz_attempt.correct_answers = correct_answers
+    quiz_attempt.wrong_answers = wrong_answers
+    quiz_attempt.final_score = final_score
+    quiz_attempt.score_percentage = score_percentage
+    quiz_attempt.result = result
+    quiz_attempt.quiz_status = quiz_status
+    quiz_attempt.ended_at = timezone.now()
+    quiz_attempt.save()
 
     return Response({
-        "quiz_Id": quiz.id,
+        "quiz_id": quiz.id,
         "quiz_attempt_id": str(quiz_attempt.id),
-        "attempt_number": attempt_number,  # Include attempt number
-        "max_attempts": quiz.max_attempts,  # Include max attempts
-        "attempted_questions": quiz_attempt.attempted_questions,
-        "total_questions": quiz_attempt.total_questions,
-        "correct_answers": quiz_attempt.correct_answers,
-        "wrong_answers": quiz_attempt.wrong_answers,
-        "Final Score": quiz_attempt.final_score,
-        "score_percentage": round(quiz_attempt.score_percentage, 2),
-        "passing_percentage": quiz_attempt.passing_percentage,
-        "result": quiz_attempt.result,
-        "quiz_status": quiz_attempt.quiz_status,
+        "attempt_number": attempt_number,
+        "total_attempts": previous_attempts + 1,
+        "attempted_questions": attempted_questions,
+        "total_questions": total_questions,
+        "correct_answers": correct_answers,
+        "wrong_answers": wrong_answers,
+        "final_score": final_score,
+        "score_percentage": round(score_percentage, 2),
+        "passing_percentage": passing_percentage,
+        "result": result,
+        "quiz_status": quiz_status,
         "started_at": quiz_attempt.started_at,
         "ended_at": quiz_attempt.ended_at,
         "folder": quiz.folder.id if quiz.folder else None,
-        "user_id": str(quiz_attempt.user._id)
+        "user_id": str(request.user._id)
     }, status=200)
 
 
@@ -3314,6 +3417,167 @@ def quiz_history(request):
         })
 
     return Response(history, status=status.HTTP_200_OK)
+
+
+
+
+
+@api_view(['GET'])
+@authentication_classes([CustomJWTAuthentication])
+@permission_classes([IsAuthenticated])
+def review_quiz_attempt(request, quiz_id, attempt_id):
+    """
+    Review a quiz attempt:
+    - Return all quiz questions (answered or not)
+    - MCQ: options with explanations (no question-level explanation)
+    - FIB & SUB: fetch correct answers from related models
+    - TF: fetch correct answer
+    """
+    try:
+        quiz = Quiz.objects.get(id=quiz_id)
+        attempt = QuizAttempt.objects.get(id=attempt_id, quiz=quiz, user=request.user)
+    except (Quiz.DoesNotExist, QuizAttempt.DoesNotExist):
+        return Response({"error": "Quiz or attempt not found"}, status=404)
+
+    folder = quiz.folder
+    folder_ids = get_all_descendant_folder_ids(folder)
+
+    quiz_questions = []
+
+    # --- MCQ questions ---
+    if "MCQ" in quiz.question_types:
+        mcq_qs = MCQuestion.objects.filter(folder_id__in=folder_ids)
+        for q in mcq_qs:
+            quiz_questions.append({
+                "id": str(q.id),
+                "statement": q.statement,
+                "question_type": "MCQ",
+                "answers": [
+                    {
+                        "id": str(ans.id),
+                        "answer_text": ans.answer_text,
+                        "explanation": ans.explanation or "",
+                        "is_correct": ans.is_correct
+                    }
+                    for ans in q.answers.all()
+                ]
+            })
+
+    # --- TRUE/FALSE questions ---
+    if "TRUEFALSE" in quiz.question_types:
+        tf_qs = CheckStatement.objects.filter(folder_id__in=folder_ids)
+        for q in tf_qs:
+            correct_tf = TrueFalse.objects.filter(statement=q).first()
+            quiz_questions.append({
+                "id": str(q.id),
+                "statement": q.statement,
+                "question_type": "TF",
+                "explanation": getattr(q, "explanation", ""),
+                "correct_answer": correct_tf.ans if correct_tf else None,
+                "answers": []
+            })
+
+    # --- FILL questions ---
+    if "FIB" in quiz.question_types:
+        fib_qs = FillQuestions.objects.filter(folder_id__in=folder_ids)
+        for q in fib_qs:
+            correct_fibs = list(q.answers.values_list("answer", flat=True))  # ✅ use related_name='answers'
+            quiz_questions.append({
+                "id": str(q.id),
+                "statement": q.statement,
+                "question_type": "FILL",
+                "explanation": getattr(q, "explanation", ""),
+                "correct_answer": correct_fibs,
+                "answers": []
+            })
+
+    # --- SUBJECTIVE questions ---
+    if "SUB" in quiz.question_types:
+        sub_qs = Question.objects.filter(folder_id__in=folder_ids, question_type="SUB")
+        for q in sub_qs:
+            correct_subs = list(q.related_answers.values_list("answer_text", flat=True))  # ✅ use related_name='related_answers'
+            quiz_questions.append({
+                "id": str(q.id),
+                "statement": q.statement,
+                "question_type": "SUB",
+                "explanation": getattr(q, "explanation", ""),
+                "correct_answer": correct_subs,
+                "answers": []
+            })
+
+    # --- IMAGE questions ---
+    if "IMAGE" in quiz.question_types:
+        img_qs = UploadedImage.objects.filter(folder_id__in=folder_ids, question_type="IMAGE")
+        for img in img_qs:
+            correct_answers = img.labels or {str(i+1): m.get("answer", "") for i, m in enumerate(img.masks)}
+            quiz_questions.append({
+                "id": str(img.id),
+                "question_type": "IMAGE",
+                "image_url": request.build_absolute_uri(f"/api/get_gridfs_image/{img.gridfs_id}") if img.gridfs_id else None,
+                "correct_answer": correct_answers,
+                "answers": []  # frontend can display labels on image
+            })
+
+    # --- Build dict for fast lookup ---
+    quiz_question_map = {q["id"]: q for q in quiz_questions}
+    answers = QuizAttemptAnswer.objects.filter(attempt=attempt, question_id__in=quiz_question_map.keys())
+    answers_map = {str(ans.question_id): ans for ans in answers}
+
+    # --- Build review response ---
+    review = []
+    for qid, qdata in quiz_question_map.items():
+        ans = answers_map.get(qid)
+
+        given_answer = ans.given_answer if ans else None
+        is_correct = ans.is_correct if ans else None
+        correct_answer = qdata.get("correct_answer")
+
+        # If MCQ, recompute correct_answer from options
+        if qdata["question_type"] == "MCQ":
+            correct_answer = [
+                option["answer_text"]
+                for option in qdata["answers"]
+                if option["is_correct"]
+            ]
+
+        if qdata["question_type"] == "IMAGE":
+            review.append({
+                "question_id": qid,
+                "question_type": "IMAGE",
+                "statement": qdata.get("statement", ""),     # the question prompt
+                "explanation": qdata.get("explanation", ""), # detailed answer explanation
+                "image_url": qdata.get("image_url"),
+                "given_answer": given_answer,                # dict { "1": "Aorta", ... }
+                "correct_answer": correct_answer,            # dict { "1": "Aorta", ... }
+                "is_correct": is_correct,
+                "answers": []                                # not used for IMAGE
+            })
+
+
+        review.append({
+            "question_id": qid,
+            "question_type": qdata["question_type"],
+            "statement": qdata["statement"],
+            "explanation": qdata.get("explanation", ""),
+            "given_answer": given_answer,
+            "correct_answer": correct_answer,
+            "is_correct": is_correct,
+            "answers": qdata.get("answers", [])
+        })
+
+    response_data = {
+        "quiz_id": quiz_id,
+        "attempt_id": attempt_id,
+        "attempt_number": QuizAttempt.objects.filter(
+            quiz=quiz, user=request.user, id__lte=attempt_id
+        ).count(),
+        "total_attempts": QuizAttempt.objects.filter(
+            quiz=quiz, user=request.user
+        ).count(),
+        "review": review,
+    }
+
+    return Response(response_data, status=200)
 
 
 

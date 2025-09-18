@@ -207,6 +207,7 @@ class Migration(migrations.Migration):
                 ('ended_at', models.DateTimeField(blank=True, null=True)),
                 ('passing_percentage', models.FloatField(default=35.0)),
                 ('max_attempts', models.IntegerField(blank=True, null=True)),
+                ('question_types', djongo.models.fields.JSONField(default=list)),
             ],
         ),
         migrations.CreateModel(
@@ -224,6 +225,25 @@ class Migration(migrations.Migration):
                 ('quiz_status', models.CharField(max_length=20)),
                 ('started_at', models.DateTimeField(default=django.utils.timezone.now)),
                 ('ended_at', models.DateTimeField(default=django.utils.timezone.now)),
+            ],
+        ),
+        migrations.CreateModel(
+            name='QuizAttemptAnswer',
+            fields=[
+                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                ('question_id', models.CharField(max_length=100)),
+                ('question_type', models.CharField(max_length=20)),
+                ('given_answer', models.TextField()),
+                ('correct_answer', models.TextField()),
+                ('is_correct', models.BooleanField(default=False)),
+            ],
+        ),
+        migrations.CreateModel(
+            name='QuizQuestion',
+            fields=[
+                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                ('question_type', models.CharField(max_length=20)),
+                ('question_id', models.CharField(max_length=100)),
             ],
         ),
         migrations.CreateModel(
@@ -432,6 +452,16 @@ class Migration(migrations.Migration):
         migrations.AddIndex(
             model_name='reviewschedule',
             index=models.Index(fields=['flashcard_id', 'flashcard_type'], name='review_sche_flashca_647dcf_idx'),
+        ),
+        migrations.AddField(
+            model_name='quizquestion',
+            name='quiz',
+            field=models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='quiz_questions', to='Flash.quiz'),
+        ),
+        migrations.AddField(
+            model_name='quizattemptanswer',
+            name='attempt',
+            field=models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='answers', to='Flash.quizattempt'),
         ),
         migrations.AddField(
             model_name='quizattempt',

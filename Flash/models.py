@@ -639,6 +639,8 @@ class Quiz(models.Model):
     ended_at = models.DateTimeField(null=True, blank=True)
     passing_percentage = models.FloatField(default=35.0)
     max_attempts = models.IntegerField(null=True, blank=True)
+    # ✅ NEW: store which types were selected for this quiz
+    question_types = models.JSONField(default=list)
 
     def __str__(self):
         return f"Quiz {self.id} by {self.created_by}"
@@ -666,6 +668,26 @@ class QuizAttempt(models.Model):
         return f"{self.user} - {self.quiz} - Attempt {self.attempt_number}"
 
 
+class QuizAttemptAnswer(models.Model):
+    attempt = models.ForeignKey(QuizAttempt, on_delete=models.CASCADE, related_name="answers")
+    question_id = models.CharField(max_length=100)   # works for both string & int IDs
+    question_type = models.CharField(max_length=20)  # MCQ / FILL / TF / SUB
+    given_answer = models.TextField()
+    correct_answer = models.TextField()
+    is_correct = models.BooleanField(default=False)
+
+    def __str__(self):
+        return f"{self.question_type} - {self.given_answer} ({'✅' if self.is_correct else '❌'})"
+
+
+class QuizQuestion(models.Model):
+    quiz = models.ForeignKey(Quiz, on_delete=models.CASCADE, related_name="quiz_questions")
+    question_type = models.CharField(max_length=20)  # MCQ / FILL / TF / SUB
+    question_id = models.CharField(max_length=100)   # Works for any type (string or int)
+
+    def __str__(self):
+        return f"Quiz {self.quiz.id} -> {self.question_type} {self.question_id}"
+    
 #Time_Spent
 
 class ReviewSession(models.Model):
