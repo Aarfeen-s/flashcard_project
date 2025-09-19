@@ -693,7 +693,7 @@ class QuizQuestion(models.Model):
 class ReviewSession(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     flashcard_id = models.CharField(max_length=255)
-    flashcard_type = models.CharField(max_length=50, choices=[('MCQ', 'MCQ'), ('FIB', 'FIB'), ('SUB', 'SUB'), ('TRUEFALSE', 'TRUEFALSE')])
+    flashcard_type = models.CharField(max_length=50, choices=[('MCQ', 'MCQ'), ('FIB', 'FIB'), ('SUB', 'SUB'), ('TRUEFALSE', 'TRUEFALSE'), ('IMAGE', 'IMAGE'),])
     time_spent = models.FloatField(help_text="Time spent on the flashcard in hours")  # Time in hours
     reviewed_at = models.DateTimeField(auto_now_add=True)
 
@@ -863,6 +863,10 @@ class CustomRolePermission(models.Model):
     can_read_tf = models.BooleanField(default=True)
     can_update_tf = models.BooleanField(default=True)
     can_delete_tf = models.BooleanField(default=True)
+    can_create_image = models.BooleanField(default=True) # Image Question/Answer CRUD
+    can_read_image = models.BooleanField(default=True)
+    can_update_image = models.BooleanField(default=True)
+    can_delete_image = models.BooleanField(default=True)
 
     # Start Flashcard/Quiz
     can_start_flashcard = models.BooleanField(default=True)

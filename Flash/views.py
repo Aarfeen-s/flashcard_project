@@ -574,6 +574,7 @@ class DirectoryViewSet(viewsets.ReadOnlyModelViewSet):
         fill_answers = folder.fill_answers.all()
         check_statements = folder.check_statements.all()
         true_false = folder.true_false.all()
+        uploaded_images = folder.uploaded_images.all()
 
         return Response({
             'files': FileSerializer(files, many=True).data,
@@ -585,6 +586,7 @@ class DirectoryViewSet(viewsets.ReadOnlyModelViewSet):
             'fill_answers': FillAnswerOnlySerializer(fill_answers, many=True).data,
             'check_statements': CheckStatementOnlySerializer(check_statements, many=True).data,
             'true_false': TrueFalseOnlySerializer(true_false, many=True).data,
+            'uploaded_images': UploadedImageSerializer(uploaded_images, many=True).data,
         })
 
 
@@ -1348,6 +1350,7 @@ class ReviewFlashcardsView(APIView):
             'FIB': FillQuestions,
             'SUB': Question,
             'TRUEFALSE': CheckStatement,
+            'IMAGE': UploadedImage,
         }
         return model_mapping.get(flashcard_type)
     
@@ -1358,6 +1361,7 @@ class ReviewFlashcardsView(APIView):
             'FIB': FillQuestionsSerializer,
             'SUB': QuestionSerializer,
             'TRUEFALSE': CheckStatementSerializer,
+            'IMAGE': UploadedImageSerializer,
         }
         serializer_class = serializer_mapping.get(flashcard_type)
         if serializer_class:
@@ -1375,6 +1379,7 @@ class AllReviewFlashcardsView(APIView):
             'FIB': FillQuestions,
             'SUB': Question,
             'TRUEFALSE': CheckStatement,
+            'IMAGE': UploadedImage,
         }
         return models_mapping.get(flashcard_type)
 
@@ -1384,6 +1389,7 @@ class AllReviewFlashcardsView(APIView):
             'FIB': FillQuestionsSerializer,
             'SUB': QuestionSerializer,
             'TRUEFALSE': CheckStatementSerializer,
+            'IMAGE': UploadedImageSerializer,
         }
         serializer_class = serializers_mapping.get(flashcard_type)
         if serializer_class:
@@ -1450,6 +1456,7 @@ class ReviewFlashcardsBySubfolderView(APIView):
             'FIB': FillQuestions,
             'SUB': Question,
             'TRUEFALSE': CheckStatement,
+            'IMAGE': UploadedImage,
         }
         return models_mapping.get(flashcard_type)
     
@@ -1460,6 +1467,7 @@ class ReviewFlashcardsBySubfolderView(APIView):
             'FIB': FillQuestionsSerializer,
             'SUB': QuestionSerializer,
             'TRUEFALSE': CheckStatementSerializer,
+            'IMAGE': UploadedImageSerializer,
         }
         serializer_class = serializers_mapping.get(flashcard_type)
         if serializer_class:
@@ -1514,8 +1522,11 @@ def feedback_detail(request, feedback_id):
     elif feedback_instance.flashcard_type == 'TRUEFALSE':
         related_data = get_object_or_404(CheckStatement, id=feedback_instance.flashcard_id)
         related_answer = TrueFalse.objects.filter(statement=related_data)
-    # elif feedback_instance.flashcard_type == 'IMAGE':
-    #     related_data = get_object_or_404(UploadedImage, id=feedback_instance.flashcard_id)
+    elif feedback_instance.flashcard_type == 'IMAGE':
+        related_data = get_object_or_404(UploadedImage, id=feedback_instance.flashcard_id)
+        # For image flashcards, answers are usually the labels/masks, not a separate table
+        related_answer = related_data.masks if related_data.masks else None
+    
         
 
     context = {
@@ -1545,6 +1556,7 @@ def manage_tags(request, subfolder_id, question_type, question_id, tag_id=None):
         'fib': (FillQuestions, FillQuestionsSerializer),
         'sub': (Question, QuestionSerializer),
         'truefalse': (CheckStatement, CheckStatementSerializer),
+        'image': (UploadedImage, UploadedImageSerializer),
     }
 
     if question_type.lower() not in question_mapping:
@@ -1633,6 +1645,7 @@ class QuestionFeedbackView(APIView):
             'FIB': FillQuestions,
             'SUB': Question,
             'TRUEFALSE': CheckStatement,
+            'IMAGE': UploadedImage,
         }
         return model_mapping.get(question_type)
 
@@ -1694,7 +1707,7 @@ class QuestionFeedbackView(APIView):
         question_type = question_type.upper()
 
         # Validate question type
-        if question_type not in ['MCQ', 'FIB', 'SUB', 'TRUEFALSE']:
+        if question_type not in ['MCQ', 'FIB', 'SUB', 'TRUEFALSE', 'IMAGE']:
             return Response({"detail": "Invalid question type."}, status=status.HTTP_400_BAD_REQUEST)
 
         # Get the subfolder
@@ -1713,6 +1726,9 @@ class QuestionFeedbackView(APIView):
         elif question_type == 'TRUEFALSE':
             question_model = CheckStatement
             question_serializer_class = CheckStatementSerializer
+        elif question_type == 'IMAGE':   # ✅ Added
+            question_model = UploadedImage
+            question_serializer_class = UploadedImageSerializer
         else:
             return Response({"detail": "Invalid question type."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1769,7 +1785,7 @@ class QuestionFeedbackView(APIView):
         question_type = question_type.upper()
 
         # Validate question type
-        if question_type not in ['MCQ', 'FIB', 'SUB', 'TRUEFALSE']:
+        if question_type not in ['MCQ', 'FIB', 'SUB', 'TRUEFALSE', 'IMAGE']:
             return Response({"detail": "Invalid question type."}, status=status.HTTP_400_BAD_REQUEST)
 
         feedback = get_object_or_404(Feedback, flashcard_type=question_type, flashcard_id=question_id)
@@ -1783,7 +1799,7 @@ class QuestionFeedbackView(APIView):
         question_type = question_type.upper()
 
         # Validate question type
-        if question_type not in ['MCQ', 'FIB', 'SUB', 'TRUEFALSE']:
+        if question_type not in ['MCQ', 'FIB', 'SUB', 'TRUEFALSE', 'IMAGE']:
             return Response({"detail": "Invalid question type."}, status=status.HTTP_400_BAD_REQUEST)
 
         feedback = get_object_or_404(Feedback,flashcard_type=question_type, flashcard_id=question_id)
@@ -4203,7 +4219,7 @@ import csv
 from django.http import HttpResponse
 from rest_framework.decorators import api_view, authentication_classes, permission_classes
 from rest_framework.permissions import IsAuthenticated
-from .models import MCQuestion, MCQAnswer, FillQuestions, FillAnswers, CheckStatement, TrueFalse, Question, Answer
+from .models import MCQuestion, MCQAnswer, FillQuestions, FillAnswers, CheckStatement, TrueFalse, Question, UploadedImage
 
 @api_view(['GET'])
 @authentication_classes([CustomJWTAuthentication])
@@ -4251,6 +4267,33 @@ def export_all_questions_csv(request):
                 q.explanation, a.answer_text, '', q.folder.id if q.folder else ''
             ])
 
+   # --- Image Questions ---
+    for q in UploadedImage.objects.all():
+        if q.masks:
+            for idx, mask in enumerate(q.masks):
+                writer.writerow([
+                    q.id,
+                    'IMAGE',
+                    q.statement,
+                    q.created_by,
+                    q.created_date,
+                    q.explanation,
+                    mask.get('answer', ''),     # ✅ label text
+                    q.folder.id if q.folder else ''
+                ])
+        else:
+            # if no masks, still export the question itself
+            writer.writerow([
+                q.id,
+                'IMAGE',
+                q.statement,
+                q.created_by,
+                q.created_date,
+                q.explanation,
+                '',
+                '',
+                q.folder.id if q.folder else ''
+            ])
     return response
 
 
@@ -4454,6 +4497,21 @@ def export_all_questions_markdown(request):
             buffer.write(f"- Answer: {a.answer_text}\n")
         buffer.write(f"\nExplanation: {q.explanation or 'N/A'}\n\n")
 
+    # --- Image Questions ---
+    buffer.write("# Image Questions\n\n")
+    for q in UploadedImage.objects.all():
+        buffer.write(f"**Q{q.id}: {q.statement}**\n\n")
+        buffer.write(f"![Image](http://127.0.0.1:8000/api/get_gridfs_image/{q.image})\n\n" if q.image else "")
+
+        if q.masks:
+            for mask in q.masks:
+                buffer.write(f"- Label: {mask.get('answer', '')}\n")
+        else:
+            buffer.write("- No labels defined\n")
+
+        buffer.write(f"\nExplanation: {q.explanation or 'N/A'}\n\n")
+
+
     response = HttpResponse(buffer.getvalue(), content_type="text/markdown")
     response['Content-Disposition'] = 'attachment; filename="all_questions.md"'
     return response
@@ -4519,6 +4577,21 @@ def import_all_questions_markdown(request):
                 q = Question.objects.create(statement=statement, explanation=explanation, question_type="SUB", created_by=user._id, folder=folder)
                 for ans in answers:
                     Answer.objects.create(question=q, answer_text=ans, folder=folder)
+
+            elif "IMAGE" in section_title:
+                q = UploadedImage.objects.create(
+                    statement=statement,
+                    explanation=explanation,
+                    question_type="IMAGE",
+                    created_by=user._id,
+                    folder=folder
+                )
+
+                # Extract labels (from "- Label: ..." lines)
+                labels = [line.replace("Label:", "").strip() for line in answers if line.startswith("Label:")]
+                if labels:
+                    q.masks = [{"answer": lbl} for lbl in labels]
+                    q.save()
 
     return Response({"message": "Markdown import completed successfully!"})
 

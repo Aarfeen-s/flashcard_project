@@ -583,6 +583,8 @@ class CombinedQuestionSerializer(serializers.ModelSerializer):
             return 'True/False'
         elif isinstance(instance, Question):
             return 'SUB'
+        elif isinstance(instance, UploadedImage):   # ✅ Added
+            return 'IMAGE'
         else:
             return 'Unknown'
 
@@ -595,6 +597,8 @@ class CombinedQuestionSerializer(serializers.ModelSerializer):
             serializer = CheckStatementSerializer(instance)
         elif isinstance(instance, Question):
             serializer = QuestionSerializer(instance)
+        elif isinstance(instance, UploadedImage):   # ✅ Added
+            serializer = UploadedImageSerializer(instance)
         else:
             return None  # Handle error or unknown instance type
         
